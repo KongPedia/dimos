@@ -26,8 +26,10 @@ from typing import (
 )
 
 from dimos.core.stream import In, Out, Stream, Transport
+from dimos.msgs.protocol import DimosMsg
 from dimos.protocol.pubsub.jpeg_shm import JpegSharedMemory
 from dimos.protocol.pubsub.lcmpubsub import LCM, JpegLCM, PickleLCM, Topic as LCMTopic
+from dimos.protocol.pubsub.rospubsub import DimosROS, ROSTopic
 from dimos.protocol.pubsub.shmpubsub import PickleSharedMemory, SharedMemory
 
 if TYPE_CHECKING:
@@ -219,6 +221,41 @@ class JpegShmTransport(PubSubTransport[T]):
     def stop(self) -> None:
         self.shm.stop()
         self._started = False
+
+
+class ROSTransport(PubSubTransport[DimosMsg]):
+    _ros: DimosROS | None = None
+
+    def __init__(self, topic: str, msg_type: type[DimosMsg], **kwargs: Any) -> None:
+        super().__init__(ROSTopic(topic, msg_type))
+        self._kwargs = kwargs
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (ROSTransport, (self.topic.topic, self.topic.msg_type))
+
+    def broadcast(self, _: Out[DimosMsg], msg: DimosMsg) -> None:
+        if self._ros is None:
+            self.start()
+            assert self._ros is not None  # for type narrowing
+        self._ros.publish(self.topic, msg)
+
+    def subscribe(
+        self, callback: Callable[[DimosMsg], Any], selfstream: Stream[DimosMsg] | None = None
+    ) -> Callable[[], None]:
+        if self._ros is None:
+            self.start()
+            assert self._ros is not None  # for type narrowing
+        return self._ros.subscribe(self.topic, lambda msg, topic: callback(msg))
+
+    def start(self) -> None:
+        if self._ros is None:
+            self._ros = DimosROS(**self._kwargs)
+            self._ros.start()
+
+    def stop(self) -> None:
+        if self._ros is not None:
+            self._ros.stop()
+            self._ros = None
 
 
 class ZenohTransport(PubSubTransport[T]): ...

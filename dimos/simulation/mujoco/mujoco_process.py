@@ -29,8 +29,7 @@ from numpy.typing import NDArray
 import open3d as o3d  # type: ignore[import-untyped]
 
 from dimos.core.global_config import GlobalConfig
-from dimos.msgs.geometry_msgs import Vector3
-from dimos.robot.unitree_webrtc.type.lidar import LidarMessage
+from dimos.msgs.sensor_msgs import PointCloud2
 from dimos.simulation.mujoco.constants import (
     DEPTH_CAMERA_FOV,
     LIDAR_FPS,
@@ -211,11 +210,10 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
                     pcd.points = o3d.utility.Vector3dVector(combined_points)
                     pcd = pcd.voxel_down_sample(voxel_size=LIDAR_RESOLUTION)
 
-                    lidar_msg = LidarMessage(
+                    lidar_msg = PointCloud2(
                         pointcloud=pcd,
                         ts=time.time(),
-                        origin=Vector3(pos[0], pos[1], pos[2]),
-                        resolution=LIDAR_RESOLUTION,
+                        frame_id="world",
                     )
                     shm.write_lidar(lidar_msg)
 

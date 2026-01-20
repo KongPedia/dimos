@@ -34,10 +34,18 @@ from dimos.agents.vlm_agent import vlm_agent
 from dimos.agents.vlm_stream_tester import vlm_stream_tester
 from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
 from dimos.core.blueprints import autoconnect
-from dimos.core.transport import JpegLcmTransport, JpegShmTransport, LCMTransport, pSHMTransport
+from dimos.core.transport import (
+    JpegLcmTransport,
+    JpegShmTransport,
+    LCMTransport,
+    ROSTransport,
+    pSHMTransport,
+)
 from dimos.dashboard.tf_rerun_module import tf_rerun
 from dimos.mapping.costmapper import cost_mapper
 from dimos.mapping.voxels import voxel_mapper
+from dimos.msgs.geometry_msgs import PoseStamped
+from dimos.msgs.nav_msgs import OccupancyGrid
 from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.msgs.vision_msgs import Detection2DArray
 from dimos.navigation.frontier_exploration import (
@@ -99,6 +107,15 @@ nav = autoconnect(
     replanning_a_star_planner(),
     wavefront_frontier_explorer(),
 ).global_config(n_dask_workers=6, robot_model="unitree_go2")
+
+ros = nav.transports(
+    {
+        ("lidar", PointCloud2): ROSTransport("lidar", PointCloud2),
+        ("global_map", PointCloud2): ROSTransport("global_map", PointCloud2),
+        ("odom", PoseStamped): ROSTransport("odom", PoseStamped),
+        ("color_image", Image): ROSTransport("color_image", Image),
+    }
+)
 
 detection = (
     autoconnect(

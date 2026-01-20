@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025-2026 Dimensional Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import itertools
-
-from dimos.msgs.sensor_msgs import PointCloud2
-from dimos.robot.unitree_webrtc.type.lidar import pointcloud2_from_webrtc_lidar
-from dimos.utils.testing import SensorReplay
+from typing import Protocol, runtime_checkable
 
 
-def test_init() -> None:
-    lidar = SensorReplay("office_lidar")
+@runtime_checkable
+class DimosMsg(Protocol):
+    """Protocol for dimos message types (LCM-based messages from dimos.msgs)."""
 
-    for raw_frame in itertools.islice(lidar.iterate(), 5):
-        assert isinstance(raw_frame, dict)
-        frame = pointcloud2_from_webrtc_lidar(raw_frame)
-        assert isinstance(frame, PointCloud2)
+    msg_name: str
+
+    @classmethod
+    def lcm_decode(cls, data: bytes) -> "DimosMsg":
+        """Decode bytes into a message instance."""
+        ...
+
+    def lcm_encode(self) -> bytes:
+        """Encode this message instance into bytes."""
+        ...

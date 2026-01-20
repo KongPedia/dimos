@@ -38,7 +38,7 @@ PubSubContext = Callable[[], AbstractContextManager[PubSub[TopicT, MsgT]]]
 
 
 @dataclass
-class TestCase(Generic[TopicT, MsgT]):
+class Case(Generic[TopicT, MsgT]):
     pubsub_context: PubSubContext[TopicT, MsgT]
     msg_gen: MsgGen[TopicT, MsgT]
 
@@ -49,7 +49,7 @@ class TestCase(Generic[TopicT, MsgT]):
         return 2
 
 
-TestData = Sequence[TestCase[Any, Any]]
+TestData = Sequence[Case[Any, Any]]
 
 
 def _format_size(size_bytes: int) -> str:
