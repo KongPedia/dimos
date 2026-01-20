@@ -34,10 +34,17 @@ from reactivex.disposable import Disposable
 
 from dimos.core.global_config import GlobalConfig
 from dimos.msgs.geometry_msgs import Quaternion, Twist, Vector3
-from dimos.msgs.sensor_msgs import Image, ImageFormat
+from dimos.msgs.sensor_msgs import CameraInfo, Image, ImageFormat
 from dimos.robot.unitree_webrtc.type.lidar import LidarMessage
 from dimos.robot.unitree_webrtc.type.odometry import Odometry
-from dimos.simulation.mujoco.constants import LAUNCHER_PATH, LIDAR_FPS, VIDEO_FPS
+from dimos.simulation.mujoco.constants import (
+    LAUNCHER_PATH,
+    LIDAR_FPS,
+    VIDEO_CAMERA_FOV,
+    VIDEO_FPS,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
+)
 from dimos.simulation.mujoco.shared_memory import ShmWriter
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
@@ -78,6 +85,32 @@ class MujocoConnection:
         self._stream_threads: list[threading.Thread] = []
         self._stop_events: list[threading.Event] = []
         self._is_cleaned_up = False
+
+    @staticmethod
+    def _compute_camera_info() -> CameraInfo:
+        """Compute camera intrinsics from MuJoCo camera parameters.
+
+        Uses pinhole camera model: f = height / (2 * tan(fovy / 2))
+        """
+        import math
+
+        fovy = math.radians(VIDEO_CAMERA_FOV)
+        f = VIDEO_HEIGHT / (2 * math.tan(fovy / 2))
+        cx = VIDEO_WIDTH / 2.0
+        cy = VIDEO_HEIGHT / 2.0
+
+        return CameraInfo(
+            frame_id="camera_optical",
+            height=VIDEO_HEIGHT,
+            width=VIDEO_WIDTH,
+            distortion_model="plumb_bob",
+            D=[0.0, 0.0, 0.0, 0.0, 0.0],
+            K=[f, 0.0, cx, 0.0, f, cy, 0.0, 0.0, 1.0],
+            R=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            P=[f, 0.0, cx, 0.0, 0.0, f, cy, 0.0, 0.0, 0.0, 1.0, 0.0],
+        )
+
+    camera_info_static: CameraInfo = _compute_camera_info()
 
     def start(self) -> None:
         self.shm_data = ShmWriter()
