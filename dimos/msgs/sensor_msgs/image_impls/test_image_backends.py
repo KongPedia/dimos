@@ -356,6 +356,7 @@ def test_perf_resize(alloc_timer) -> None:
         print(f"resize (avg per call) cpu={cpu_t:.6f}s")
 
 
+@pytest.mark.integration
 def test_perf_sharpness(alloc_timer) -> None:
     """Test sharpness performance with NumpyImage always, add CudaImage when available."""
     arr = _prepare_image(ImageFormat.BGR, (480, 640, 3))
