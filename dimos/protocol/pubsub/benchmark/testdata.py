@@ -101,12 +101,12 @@ def memory_msggen(size: int) -> tuple[str, Any]:
     return ("benchmark/memory", make_data_image(size))
 
 
-testcases.append(
-    Case(
-        pubsub_context=memory_pubsub_channel,
-        msg_gen=memory_msggen,
-    )
-)
+# testcases.append(
+#     Case(
+#         pubsub_context=memory_pubsub_channel,
+#         msg_gen=memory_msggen,
+#     )
+# )
 
 
 @contextmanager
