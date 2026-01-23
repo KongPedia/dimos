@@ -103,8 +103,6 @@ misc = [
     "timm>=1.0.15",
     "edgetam-dimos",
     "opencv-contrib-python==4.10.0.84",
-    "omegaconf>=2.3.0",
-    "hydra-core>=1.3.0",
 
     # embedding models
     "open_clip_torch==3.2.0",
@@ -163,6 +161,8 @@ perception = [
     "lap>=0.5.12",
     "transformers[torch]==4.49.0",
     "moondream",
+    "omegaconf>=2.3.0",
+    "hydra-core>=1.3.0",
 ]
 
 unitree = [
