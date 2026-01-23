@@ -14,27 +14,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pathlib import Path
 import platform
 
-from dimos_lcm.foxglove_msgs.ImageAnnotations import (  # type: ignore[import-untyped]
-    ImageAnnotations,
+from dimos_lcm.foxglove_msgs.ImageAnnotations import (
+    ImageAnnotations,  # type: ignore[import-untyped]
 )
+from dimos_lcm.foxglove_msgs.SceneUpdate import SceneUpdate  # type: ignore[import-untyped]
 
 from dimos.agents.agent import llm_agent
 from dimos.agents.cli.human import human_input
 from dimos.agents.cli.web import web_input
 from dimos.agents.ollama_agent import ollama_installed
 from dimos.agents.skills.navigation import navigation_skill
+from dimos.agents.skills.person_follow import person_follow_skill
 from dimos.agents.skills.speak_skill import speak_skill
 from dimos.agents.spec import Provider
 from dimos.agents.vlm_agent import vlm_agent
 from dimos.agents.vlm_stream_tester import vlm_stream_tester
 from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
 from dimos.core.blueprints import autoconnect
-from dimos.core.transport import JpegLcmTransport, JpegShmTransport, LCMTransport, pSHMTransport
+from dimos.core.transport import (
+    JpegLcmTransport,
+    JpegShmTransport,
+    LCMTransport,
+    ROSTransport,
+    pSHMTransport,
+)
 from dimos.dashboard.tf_rerun_module import tf_rerun
 from dimos.mapping.costmapper import cost_mapper
 from dimos.mapping.voxels import voxel_mapper
+from dimos.msgs.geometry_msgs import PoseStamped
 from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.msgs.vision_msgs import Detection2DArray
 from dimos.navigation.frontier_exploration import (
@@ -43,14 +53,18 @@ from dimos.navigation.frontier_exploration import (
 from dimos.navigation.replanning_a_star.module import (
     replanning_a_star_planner,
 )
-from dimos.perception.detection.moduleDB import ObjectDBModule, detectionDB_module
+from dimos.perception.detection.module3D import Detection3DModule, detection3d_module
+from dimos.perception.experimental.temporal_memory import temporal_memory
 from dimos.perception.spatial_perception import spatial_memory
 from dimos.protocol.mcp.mcp import MCPModule
 from dimos.robot.foxglove_bridge import foxglove_bridge
+import dimos.robot.unitree.connection.go2 as _go2_mod
 from dimos.robot.unitree.connection.go2 import GO2Connection, go2_connection
 from dimos.robot.unitree_webrtc.unitree_skill_container import unitree_skills
 from dimos.utils.monitoring import utilization
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
+
+_GO2_URDF = Path(_go2_mod.__file__).parent.parent / "go2" / "go2.urdf"
 
 # Mac has some issue with high bandwidth UDP
 #
@@ -77,7 +91,12 @@ basic = autoconnect(
     go2_connection(),
     linux if platform.system() == "Linux" else mac,
     websocket_vis(),
-    tf_rerun(),  # Auto-visualize all TF transforms in Rerun
+    tf_rerun(
+        urdf_path=str(_GO2_URDF),
+        cameras=[
+            ("world/robot/camera", "camera_optical", GO2Connection.camera_info_static),
+        ],
+    ),
 ).global_config(n_dask_workers=4, robot_model="unitree_go2")
 
 nav = autoconnect(
@@ -88,42 +107,51 @@ nav = autoconnect(
     wavefront_frontier_explorer(),
 ).global_config(n_dask_workers=6, robot_model="unitree_go2")
 
+ros = nav.transports(
+    {
+        ("lidar", PointCloud2): ROSTransport("lidar", PointCloud2),
+        ("global_map", PointCloud2): ROSTransport("global_map", PointCloud2),
+        ("odom", PoseStamped): ROSTransport("odom", PoseStamped),
+        ("color_image", Image): ROSTransport("color_image", Image),
+    }
+)
+
 detection = (
     autoconnect(
         nav,
-        detectionDB_module(
+        detection3d_module(
             camera_info=GO2Connection.camera_info_static,
         ),
     )
     .remappings(
         [
-            (ObjectDBModule, "pointcloud", "global_map"),
+            (Detection3DModule, "pointcloud", "global_map"),
         ]
     )
     .transports(
         {
             # Detection 3D module outputs
-            ("detections", ObjectDBModule): LCMTransport(
+            ("detections", Detection3DModule): LCMTransport(
                 "/detector3d/detections", Detection2DArray
             ),
-            ("annotations", ObjectDBModule): LCMTransport(
+            ("annotations", Detection3DModule): LCMTransport(
                 "/detector3d/annotations", ImageAnnotations
             ),
-            #            ("scene_update", ObjectDBModule): LCMTransport(
-            #                "/detector3d/scene_update", SceneUpdate
-            #            ),
-            ("detected_pointcloud_0", ObjectDBModule): LCMTransport(
+            ("scene_update", Detection3DModule): LCMTransport(
+                "/detector3d/scene_update", SceneUpdate
+            ),
+            ("detected_pointcloud_0", Detection3DModule): LCMTransport(
                 "/detector3d/pointcloud/0", PointCloud2
             ),
-            ("detected_pointcloud_1", ObjectDBModule): LCMTransport(
+            ("detected_pointcloud_1", Detection3DModule): LCMTransport(
                 "/detector3d/pointcloud/1", PointCloud2
             ),
-            ("detected_pointcloud_2", ObjectDBModule): LCMTransport(
+            ("detected_pointcloud_2", Detection3DModule): LCMTransport(
                 "/detector3d/pointcloud/2", PointCloud2
             ),
-            ("detected_image_0", ObjectDBModule): LCMTransport("/detector3d/image/0", Image),
-            ("detected_image_1", ObjectDBModule): LCMTransport("/detector3d/image/1", Image),
-            ("detected_image_2", ObjectDBModule): LCMTransport("/detector3d/image/2", Image),
+            ("detected_image_0", Detection3DModule): LCMTransport("/detector3d/image/0", Image),
+            ("detected_image_1", Detection3DModule): LCMTransport("/detector3d/image/1", Image),
+            ("detected_image_2", Detection3DModule): LCMTransport("/detector3d/image/2", Image),
         }
     )
 )
@@ -157,6 +185,7 @@ with_jpegshm = autoconnect(
 _common_agentic = autoconnect(
     human_input(),
     navigation_skill(),
+    person_follow_skill(camera_info=GO2Connection.camera_info_static),
     unitree_skills(),
     web_input(),
     speak_skill(),
@@ -197,4 +226,9 @@ vlm_stream_test = autoconnect(
     basic,
     vlm_agent(),
     vlm_stream_tester(),
+)
+
+temporal_memory = autoconnect(
+    agentic,
+    temporal_memory(),
 )

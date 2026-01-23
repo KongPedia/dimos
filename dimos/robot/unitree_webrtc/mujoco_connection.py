@@ -15,6 +15,7 @@
 # limitations under the License.
 
 
+import atexit
 import base64
 from collections.abc import Callable
 import functools
@@ -25,6 +26,7 @@ import sys
 import threading
 import time
 from typing import Any, TypeVar
+import weakref
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,10 +36,16 @@ from reactivex.disposable import Disposable
 
 from dimos.core.global_config import GlobalConfig
 from dimos.msgs.geometry_msgs import Quaternion, Twist, Vector3
-from dimos.msgs.sensor_msgs import Image
-from dimos.robot.unitree_webrtc.type.lidar import LidarMessage
+from dimos.msgs.sensor_msgs import CameraInfo, Image, ImageFormat, PointCloud2
 from dimos.robot.unitree_webrtc.type.odometry import Odometry
-from dimos.simulation.mujoco.constants import LAUNCHER_PATH, LIDAR_FPS, VIDEO_FPS
+from dimos.simulation.mujoco.constants import (
+    LAUNCHER_PATH,
+    LIDAR_FPS,
+    VIDEO_CAMERA_FOV,
+    VIDEO_FPS,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
+)
 from dimos.simulation.mujoco.shared_memory import ShmWriter
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
@@ -61,9 +69,11 @@ class MujocoConnection:
         # Pre-download the mujoco_sim data.
         get_data("mujoco_sim")
 
-        # Trigger the download of the mujoco_menajerie package. This is so it
+        # Trigger the download of the mujoco_menagerie package. This is so it
         # doesn't trigger in the mujoco process where it can time out.
-        import mujoco_playground
+        from mujoco_playground._src import mjx_env
+
+        mjx_env.ensure_menagerie_exists()
 
         self.global_config = global_config
         self.process: subprocess.Popen[bytes] | None = None
@@ -77,6 +87,32 @@ class MujocoConnection:
         self._stop_events: list[threading.Event] = []
         self._is_cleaned_up = False
 
+    @staticmethod
+    def _compute_camera_info() -> CameraInfo:
+        """Compute camera intrinsics from MuJoCo camera parameters.
+
+        Uses pinhole camera model: f = height / (2 * tan(fovy / 2))
+        """
+        import math
+
+        fovy = math.radians(VIDEO_CAMERA_FOV)
+        f = VIDEO_HEIGHT / (2 * math.tan(fovy / 2))
+        cx = VIDEO_WIDTH / 2.0
+        cy = VIDEO_HEIGHT / 2.0
+
+        return CameraInfo(
+            frame_id="camera_optical",
+            height=VIDEO_HEIGHT,
+            width=VIDEO_WIDTH,
+            distortion_model="plumb_bob",
+            D=[0.0, 0.0, 0.0, 0.0, 0.0],
+            K=[f, 0.0, cx, 0.0, f, cy, 0.0, 0.0, 1.0],
+            R=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            P=[f, 0.0, cx, 0.0, 0.0, f, cy, 0.0, 0.0, 0.0, 1.0, 0.0],
+        )
+
+    camera_info_static: CameraInfo = _compute_camera_info()
+
     def start(self) -> None:
         self.shm_data = ShmWriter()
 
@@ -87,6 +123,7 @@ class MujocoConnection:
         try:
             # mjpython must be used macOS (because of launch_passive inside mujoco_process.py)
             executable = sys.executable if sys.platform != "darwin" else "mjpython"
+
             self.process = subprocess.Popen(
                 [executable, str(LAUNCHER_PATH), config_pickle, shm_names_json],
             )
@@ -106,6 +143,16 @@ class MujocoConnection:
                 raise RuntimeError(f"MuJoCo process failed to start (exit code {exit_code})")
             if self.shm_data.is_ready():
                 logger.info("MuJoCo process started successfully")
+                # Register atexit handler to ensure subprocess is cleaned up
+                # Use weakref to avoid preventing garbage collection
+                weak_self = weakref.ref(self)
+
+                def cleanup_on_exit() -> None:
+                    instance = weak_self()
+                    if instance is not None:
+                        instance.stop()
+
+                atexit.register(cleanup_on_exit)
                 return
             time.sleep(0.1)
 
@@ -212,7 +259,7 @@ class MujocoConnection:
 
         return None
 
-    def get_lidar_message(self) -> LidarMessage | None:
+    def get_lidar_message(self) -> PointCloud2 | None:
         if self.shm_data is None:
             return None
 
@@ -261,7 +308,7 @@ class MujocoConnection:
         return Observable(on_subscribe)
 
     @functools.cache
-    def lidar_stream(self) -> Observable[LidarMessage]:
+    def lidar_stream(self) -> Observable[PointCloud2]:
         return self._create_stream(self.get_lidar_message, LIDAR_FPS, "Lidar")
 
     @functools.cache
@@ -272,7 +319,8 @@ class MujocoConnection:
     def video_stream(self) -> Observable[Image]:
         def get_video_as_image() -> Image | None:
             frame = self.get_video_frame()
-            return Image.from_numpy(frame) if frame is not None else None
+            # MuJoCo renderer returns RGB uint8 frames; Image.from_numpy defaults to BGR.
+            return Image.from_numpy(frame, format=ImageFormat.RGB) if frame is not None else None
 
         return self._create_stream(get_video_as_image, VIDEO_FPS, "Video")
 
