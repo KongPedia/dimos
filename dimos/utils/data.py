@@ -86,9 +86,8 @@ def _get_repo_root() -> Path:
                     "--depth",
                     "1",
                     "--branch",
-                    # TODO: Use "main",
-                    "dev",
-                    "git@github.com:dimensionalOS/dimos.git",
+                    "main",
+                    "https://github.com/dimensionalOS/dimos.git",
                     str(repo_dir),
                 ],
                 check=True,
@@ -99,7 +98,7 @@ def _get_repo_root() -> Path:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
                 f"Failed to clone dimos repository: {e.stderr}\n"
-                f"Make sure you have access to git@github.com:dimensionalOS/dimos.git"
+                f"Make sure you can access https://github.com/dimensionalOS/dimos.git"
             )
 
     return repo_dir
