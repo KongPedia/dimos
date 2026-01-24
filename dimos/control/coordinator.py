@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ControlOrchestrator module.
+"""ControlCoordinator module.
 
-Centralized control orchestrator that replaces per-driver/per-controller
+Centralized control coordinator that replaces per-driver/per-controller
 loops with a single deterministic tick-based system.
 
 Features:
@@ -32,6 +32,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from dimos.control.components import HardwareComponent
 from dimos.control.hardware_interface import BackendHardwareInterface, HardwareInterface
 from dimos.control.task import ControlTask
 from dimos.control.tick_loop import TickLoop
@@ -52,29 +53,6 @@ logger = setup_logger()
 # =============================================================================
 # Configuration
 # =============================================================================
-
-
-@dataclass
-class HardwareConfig:
-    """Configuration for a hardware backend.
-
-    Attributes:
-        id: Unique hardware identifier (e.g., "arm", "left_arm")
-        type: Backend type ("mock", "xarm", "piper")
-        dof: Degrees of freedom
-        joint_prefix: Prefix for joint names (defaults to id)
-        ip: IP address (required for xarm)
-        can_port: CAN port (for piper, default "can0")
-        auto_enable: Whether to auto-enable servos (default True)
-    """
-
-    id: str
-    type: str = "mock"
-    dof: int = 7
-    joint_prefix: str | None = None
-    ip: str | None = None
-    can_port: str | None = None
-    auto_enable: bool = True
 
 
 @dataclass
@@ -110,8 +88,8 @@ class TaskStatus:
 
 
 @dataclass
-class ControlOrchestratorConfig(ModuleConfig):
-    """Configuration for the ControlOrchestrator.
+class ControlCoordinatorConfig(ModuleConfig):
+    """Configuration for the ControlCoordinator.
 
     Attributes:
         tick_rate: Control loop frequency in Hz (default: 100)
@@ -124,19 +102,19 @@ class ControlOrchestratorConfig(ModuleConfig):
 
     tick_rate: float = 100.0
     publish_joint_state: bool = True
-    joint_state_frame_id: str = "orchestrator"
+    joint_state_frame_id: str = "coordinator"
     log_ticks: bool = False
-    hardware: list[HardwareConfig] = field(default_factory=lambda: [])
+    hardware: list[HardwareComponent] = field(default_factory=lambda: [])
     tasks: list[TaskConfig] = field(default_factory=lambda: [])
 
 
 # =============================================================================
-# ControlOrchestrator Module
+# ControlCoordinator Module
 # =============================================================================
 
 
-class ControlOrchestrator(Module[ControlOrchestratorConfig]):
-    """Centralized control orchestrator with per-joint arbitration.
+class ControlCoordinator(Module[ControlCoordinatorConfig]):
+    """Centralized control coordinator with per-joint arbitration.
 
     Single tick loop that:
     1. Reads state from all hardware
@@ -153,10 +131,10 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
     - Aggregated preemption (one notification per task per tick)
 
     Example:
-        >>> from dimos.control import ControlOrchestrator
+        >>> from dimos.control import ControlCoordinator
         >>> from dimos.hardware.manipulators.xarm import XArmBackend
         >>>
-        >>> orch = ControlOrchestrator(tick_rate=100.0)
+        >>> orch = ControlCoordinator(tick_rate=100.0)
         >>> backend = XArmBackend(ip="192.168.1.185", dof=7)
         >>> backend.connect()
         >>> orch.add_hardware("left_arm", backend, joint_prefix="left")
@@ -166,8 +144,8 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
     # Output: Aggregated joint state for external consumers
     joint_state: Out[JointState]
 
-    config: ControlOrchestratorConfig
-    default_config = ControlOrchestratorConfig
+    config: ControlCoordinatorConfig
+    default_config = ControlCoordinatorConfig
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -186,7 +164,7 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
         # Tick loop (created on start)
         self._tick_loop: TickLoop | None = None
 
-        logger.info(f"ControlOrchestrator initialized at {self.config.tick_rate}Hz")
+        logger.info(f"ControlCoordinator initialized at {self.config.tick_rate}Hz")
 
     # =========================================================================
     # Config-based Setup
@@ -197,9 +175,9 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
         hardware_added: list[str] = []
 
         try:
-            for hw_cfg in self.config.hardware:
-                self._setup_hardware(hw_cfg)
-                hardware_added.append(hw_cfg.id)
+            for component in self.config.hardware:
+                self._setup_hardware(component)
+                hardware_added.append(component.hardware_id)
 
             for task_cfg in self.config.tasks:
                 task = self._create_task_from_config(task_cfg)
@@ -214,44 +192,42 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
                     pass
             raise
 
-    def _setup_hardware(self, hw_cfg: HardwareConfig) -> None:
+    def _setup_hardware(self, component: HardwareComponent) -> None:
         """Connect and add a single hardware backend."""
-        backend = self._create_backend_from_config(hw_cfg)
+        backend = self._create_backend(component)
 
         if not backend.connect():
-            raise RuntimeError(f"Failed to connect to {hw_cfg.type} backend")
+            raise RuntimeError(f"Failed to connect to {component.backend_type} backend")
 
         try:
-            if hw_cfg.auto_enable and hasattr(backend, "write_enable"):
+            if component.auto_enable and hasattr(backend, "write_enable"):
                 backend.write_enable(True)
-            self.add_hardware(
-                hw_cfg.id,
-                backend,
-                joint_prefix=hw_cfg.joint_prefix or hw_cfg.id,
-            )
+
+            self.add_hardware(backend, component)
         except Exception:
             backend.disconnect()
             raise
 
-    def _create_backend_from_config(self, cfg: HardwareConfig) -> ManipulatorBackend:
-        """Create a manipulator backend from config."""
-        match cfg.type.lower():
+    def _create_backend(self, component: HardwareComponent) -> ManipulatorBackend:
+        """Create a manipulator backend from component config."""
+        dof = len(component.joints)
+        match component.backend_type.lower():
             case "mock":
                 from dimos.hardware.manipulators.mock import MockBackend
 
-                return MockBackend(dof=cfg.dof)
+                return MockBackend(dof=dof)
             case "xarm":
-                if cfg.ip is None:
-                    raise ValueError("ip is required for xarm backend")
+                if component.address is None:
+                    raise ValueError("address (IP) is required for xarm backend")
                 from dimos.hardware.manipulators.xarm import XArmBackend
 
-                return XArmBackend(ip=cfg.ip, dof=cfg.dof)
+                return XArmBackend(ip=component.address, dof=dof)
             case "piper":
                 from dimos.hardware.manipulators.piper import PiperBackend
 
-                return PiperBackend(can_port=cfg.can_port or "can0", dof=cfg.dof)
+                return PiperBackend(can_port=component.address or "can0", dof=dof)
             case _:
-                raise ValueError(f"Unknown backend type: {cfg.type}")
+                raise ValueError(f"Unknown backend type: {component.backend_type}")
 
     def _create_task_from_config(self, cfg: TaskConfig) -> ControlTask:
         """Create a control task from config."""
@@ -278,27 +254,27 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
     @rpc
     def add_hardware(
         self,
-        hardware_id: str,
         backend: ManipulatorBackend,
-        joint_prefix: str | None = None,
+        component: HardwareComponent,
     ) -> bool:
-        """Register a hardware backend with the orchestrator."""
+        """Register a hardware backend with the coordinator."""
         with self._hardware_lock:
-            if hardware_id in self._hardware:
-                logger.warning(f"Hardware {hardware_id} already registered")
+            if component.hardware_id in self._hardware:
+                logger.warning(f"Hardware {component.hardware_id} already registered")
                 return False
 
             interface = BackendHardwareInterface(
                 backend=backend,
-                hardware_id=hardware_id,
-                joint_prefix=joint_prefix,
+                component=component,
             )
-            self._hardware[hardware_id] = interface
+            self._hardware[component.hardware_id] = interface
 
             for joint_name in interface.joint_names:
-                self._joint_to_hardware[joint_name] = hardware_id
+                self._joint_to_hardware[joint_name] = component.hardware_id
 
-            logger.info(f"Added hardware {hardware_id} with joints: {interface.joint_names}")
+            logger.info(
+                f"Added hardware {component.hardware_id} with joints: {interface.joint_names}"
+            )
             return True
 
     @rpc
@@ -306,7 +282,7 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
         """Remove a hardware interface.
 
         Note: For safety, call this only when no tasks are actively using this
-        hardware. Consider stopping the orchestrator before removing hardware.
+        hardware. Consider stopping the coordinator before removing hardware.
         """
         with self._hardware_lock:
             if hardware_id not in self._hardware:
@@ -353,9 +329,9 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
         with self._hardware_lock:
             positions: dict[str, float] = {}
             for hw in self._hardware.values():
-                state = hw.read_state()  # {joint_name: (pos, vel, effort)}
-                for joint_name, (pos, _vel, _effort) in state.items():
-                    positions[joint_name] = pos
+                state = hw.read_state()  # {joint_name: JointState}
+                for joint_name, joint_state in state.items():
+                    positions[joint_name] = joint_state.position
             return positions
 
     # =========================================================================
@@ -364,7 +340,7 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
 
     @rpc
     def add_task(self, task: ControlTask) -> bool:
-        """Register a task with the orchestrator."""
+        """Register a task with the coordinator."""
         if not isinstance(task, ControlTask):
             raise TypeError("task must implement ControlTask")
 
@@ -471,9 +447,9 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
 
     @rpc
     def start(self) -> None:
-        """Start the orchestrator control loop."""
+        """Start the coordinator control loop."""
         if self._tick_loop and self._tick_loop.is_running:
-            logger.warning("Orchestrator already running")
+            logger.warning("Coordinator already running")
             return
 
         super().start()
@@ -497,12 +473,12 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
         )
         self._tick_loop.start()
 
-        logger.info(f"ControlOrchestrator started at {self.config.tick_rate}Hz")
+        logger.info(f"ControlCoordinator started at {self.config.tick_rate}Hz")
 
     @rpc
     def stop(self) -> None:
-        """Stop the orchestrator."""
-        logger.info("Stopping ControlOrchestrator...")
+        """Stop the coordinator."""
+        logger.info("Stopping ControlCoordinator...")
 
         if self._tick_loop:
             self._tick_loop.stop()
@@ -517,7 +493,7 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
                     logger.error(f"Error disconnecting hardware {hw_id}: {e}")
 
         super().stop()
-        logger.info("ControlOrchestrator stopped")
+        logger.info("ControlCoordinator stopped")
 
     @rpc
     def get_tick_count(self) -> int:
@@ -526,13 +502,13 @@ class ControlOrchestrator(Module[ControlOrchestratorConfig]):
 
 
 # Blueprint export
-control_orchestrator = ControlOrchestrator.blueprint
+control_coordinator = ControlCoordinator.blueprint
 
 
 __all__ = [
-    "ControlOrchestrator",
-    "ControlOrchestratorConfig",
-    "HardwareConfig",
+    "ControlCoordinator",
+    "ControlCoordinatorConfig",
+    "HardwareComponent",
     "TaskConfig",
-    "control_orchestrator",
+    "control_coordinator",
 ]
