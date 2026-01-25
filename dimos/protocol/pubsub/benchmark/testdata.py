@@ -199,7 +199,7 @@ except (ConnectionError, ImportError):
     print("Redis not available")
 
 
-from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE, RawROS, RawROSTopic
+from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE, DimosROS, RawROS, RawROSTopic, ROSTopic
 
 if ROS_AVAILABLE:
     from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
@@ -265,5 +265,51 @@ if ROS_AVAILABLE:
         Case(
             pubsub_context=ros_reliable_pubsub_channel,
             msg_gen=ros_msggen,
+        )
+    )
+
+    @contextmanager
+    def dimos_ros_best_effort_pubsub_channel() -> Generator[DimosROS, None, None]:
+        qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=5000,
+        )
+        ros_pubsub = DimosROS(node_name="benchmark_dimos_ros_best_effort", qos=qos)
+        ros_pubsub.start()
+        yield ros_pubsub
+        ros_pubsub.stop()
+
+    @contextmanager
+    def dimos_ros_reliable_pubsub_channel() -> Generator[DimosROS, None, None]:
+        qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=5000,
+        )
+        ros_pubsub = DimosROS(node_name="benchmark_dimos_ros_reliable", qos=qos)
+        ros_pubsub.start()
+        yield ros_pubsub
+        ros_pubsub.stop()
+
+    def dimos_ros_msggen(size: int) -> tuple[ROSTopic, Image]:
+        topic = ROSTopic(topic="/benchmark/dimos_ros", msg_type=Image)
+        return (topic, make_data_image(size))
+
+    # commented to save benchmarking time,
+    # since reliable and best effort are very similar in performance for local pubsub
+    # testcases.append(
+    #     Case(
+    #         pubsub_context=dimos_ros_best_effort_pubsub_channel,
+    #         msg_gen=dimos_ros_msggen,
+    #     )
+    # )
+
+    testcases.append(
+        Case(
+            pubsub_context=dimos_ros_reliable_pubsub_channel,
+            msg_gen=dimos_ros_msggen,
         )
     )
