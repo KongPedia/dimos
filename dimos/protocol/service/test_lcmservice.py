@@ -12,13 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import pickle
 import threading
 import time
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from dimos.protocol.service.lcmservice import (
     _DEFAULT_LCM_URL,

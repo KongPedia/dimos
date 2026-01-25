@@ -15,7 +15,8 @@
 import pytest
 
 from dimos.core.blueprints import ModuleBlueprintSet
-from dimos.robot.all_blueprints import all_blueprints, get_blueprint_by_name
+from dimos.robot.all_blueprints import all_blueprints
+from dimos.robot.get_all_blueprints import get_blueprint_by_name
 
 # Optional dependencies that are allowed to be missing
 OPTIONAL_DEPENDENCIES = {"pyrealsense2", "geometry_msgs", "turbojpeg"}

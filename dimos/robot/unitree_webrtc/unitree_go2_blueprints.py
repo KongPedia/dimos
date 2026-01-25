@@ -70,7 +70,7 @@ _GO2_URDF = Path(_go2_mod.__file__).parent.parent / "go2" / "go2.urdf"
 #
 # so we use pSHMTransport for color_image
 # (Could we adress this on the system config layer? Is this fixable on mac?)
-mac = autoconnect(
+_mac = autoconnect(
     foxglove_bridge(
         shm_channels=[
             "/color_image#sensor_msgs.Image",
@@ -85,11 +85,11 @@ mac = autoconnect(
 )
 
 
-linux = autoconnect(foxglove_bridge())
+_linux = autoconnect(foxglove_bridge())
 
-basic = autoconnect(
+unitree_go2_basic = autoconnect(
     go2_connection(),
-    linux if platform.system() == "Linux" else mac,
+    _linux if platform.system() == "Linux" else _mac,
     websocket_vis(),
     tf_rerun(
         urdf_path=str(_GO2_URDF),
@@ -99,15 +99,15 @@ basic = autoconnect(
     ),
 ).global_config(n_dask_workers=4, robot_model="unitree_go2")
 
-nav = autoconnect(
-    basic,
+unitree_go2 = autoconnect(
+    unitree_go2_basic,
     voxel_mapper(voxel_size=0.1),
     cost_mapper(),
     replanning_a_star_planner(),
     wavefront_frontier_explorer(),
 ).global_config(n_dask_workers=6, robot_model="unitree_go2")
 
-ros = nav.transports(
+unitree_go2_ros = unitree_go2.transports(
     {
         ("lidar", PointCloud2): ROSTransport("lidar", PointCloud2),
         ("global_map", PointCloud2): ROSTransport("global_map", PointCloud2),
@@ -116,9 +116,9 @@ ros = nav.transports(
     }
 )
 
-detection = (
+unitree_go2_detection = (
     autoconnect(
-        nav,
+        unitree_go2,
         detection3d_module(
             camera_info=GO2Connection.camera_info_static,
         ),
@@ -157,20 +157,20 @@ detection = (
 )
 
 
-spatial = autoconnect(
-    nav,
+unitree_go2_spatial = autoconnect(
+    unitree_go2,
     spatial_memory(),
     utilization(),
 ).global_config(n_dask_workers=8)
 
-with_jpeglcm = nav.transports(
+_with_jpeglcm = unitree_go2.transports(
     {
         ("color_image", Image): JpegLcmTransport("/color_image", Image),
     }
 )
 
-with_jpegshm = autoconnect(
-    nav.transports(
+_with_jpegshm = autoconnect(
+    unitree_go2.transports(
         {
             ("color_image", Image): JpegShmTransport("/color_image", quality=75),
         }
@@ -191,19 +191,19 @@ _common_agentic = autoconnect(
     speak_skill(),
 )
 
-agentic = autoconnect(
-    spatial,
+unitree_go2_agentic = autoconnect(
+    unitree_go2_spatial,
     llm_agent(),
     _common_agentic,
 )
 
-agentic_mcp = autoconnect(
-    agentic,
+unitree_go2_agentic_mcp = autoconnect(
+    unitree_go2_agentic,
     MCPModule.blueprint(),
 )
 
-agentic_ollama = autoconnect(
-    spatial,
+unitree_go2_agentic_ollama = autoconnect(
+    unitree_go2_spatial,
     llm_agent(
         model="qwen3:8b",
         provider=Provider.OLLAMA,  # type: ignore[attr-defined]
@@ -213,8 +213,8 @@ agentic_ollama = autoconnect(
     ollama_installed,
 )
 
-agentic_huggingface = autoconnect(
-    spatial,
+unitree_go2_agentic_huggingface = autoconnect(
+    unitree_go2_spatial,
     llm_agent(
         model="Qwen/Qwen2.5-1.5B-Instruct",
         provider=Provider.HUGGINGFACE,  # type: ignore[attr-defined]
@@ -222,13 +222,13 @@ agentic_huggingface = autoconnect(
     _common_agentic,
 )
 
-vlm_stream_test = autoconnect(
-    basic,
+unitree_go2_vlm_stream_test = autoconnect(
+    unitree_go2_basic,
     vlm_agent(),
     vlm_stream_tester(),
 )
 
-temporal_memory = autoconnect(
-    agentic,
+unitree_go2_temporal_memory = autoconnect(
+    unitree_go2_agentic,
     temporal_memory(),
 )

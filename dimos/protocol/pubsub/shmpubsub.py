@@ -34,7 +34,7 @@ import numpy.typing as npt
 
 from dimos.protocol.pubsub.lcmpubsub import LCMEncoderMixin, Topic
 from dimos.protocol.pubsub.shm.ipc_factory import CpuShmChannel
-from dimos.protocol.pubsub.spec import PickleEncoderMixin, PubSub, PubSubEncoderMixin
+from dimos.protocol.pubsub.spec import PickleEncoderMixin, PubSub
 from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
