@@ -78,6 +78,7 @@ skillspy = "dimos.utils.cli.skillspy.skillspy:main"
 agentspy = "dimos.utils.cli.agentspy.agentspy:main"
 humancli = "dimos.utils.cli.human.humanclianim:main"
 dimos = "dimos.robot.cli.dimos:main"
+doclinks = "dimos.utils.docs.doclinks:main"
 
 [project.optional-dependencies]
 misc = [
