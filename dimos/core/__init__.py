@@ -175,7 +175,7 @@ def patchdask(dask_client: Client, local_cluster: LocalCluster) -> DimosCluster:
         try:
             import gc
 
-            from dimos.protocol.pubsub import shmpubsub
+            from dimos.protocol.pubsub.impl import shmpubsub
 
             for obj in gc.get_objects():
                 if isinstance(obj, shmpubsub.SharedMemoryPubSubBase):

@@ -17,7 +17,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Generic, TypeVar
 
-from dimos.protocol.pubsub.lcmpubsub import PickleLCM
+from dimos.protocol.pubsub.impl.lcmpubsub import PickleLCM
 from dimos.protocol.service import Service  # type: ignore[attr-defined]
 from dimos.protocol.skill.type import SkillMsg
 

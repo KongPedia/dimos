@@ -20,9 +20,13 @@ import numpy as np
 
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
 from dimos.protocol.pubsub.benchmark.type import Case
-from dimos.protocol.pubsub.lcmpubsub import LCM, LCMPubSubBase, Topic as LCMTopic
-from dimos.protocol.pubsub.memory import Memory
-from dimos.protocol.pubsub.shmpubsub import BytesSharedMemory, LCMSharedMemory, PickleSharedMemory
+from dimos.protocol.pubsub.impl.lcmpubsub import LCM, LCMPubSubBase, Topic as LCMTopic
+from dimos.protocol.pubsub.impl.memory import Memory
+from dimos.protocol.pubsub.impl.shmpubsub import (
+    BytesSharedMemory,
+    LCMSharedMemory,
+    PickleSharedMemory,
+)
 
 
 def make_data_bytes(size: int) -> bytes:
@@ -171,7 +175,7 @@ testcases.append(
 
 
 try:
-    from dimos.protocol.pubsub.redispubsub import Redis
+    from dimos.protocol.pubsub.impl.redispubsub import Redis
 
     @contextmanager
     def redis_pubsub_channel() -> Generator[Redis, None, None]:
@@ -199,7 +203,13 @@ except (ConnectionError, ImportError):
     print("Redis not available")
 
 
-from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE, DimosROS, RawROS, RawROSTopic, ROSTopic
+from dimos.protocol.pubsub.impl.rospubsub import (
+    ROS_AVAILABLE,
+    DimosROS,
+    RawROS,
+    RawROSTopic,
+    ROSTopic,
+)
 
 if ROS_AVAILABLE:
     from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
