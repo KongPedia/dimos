@@ -154,8 +154,8 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
     def subscribe_all(self, callback: Callable[[bytes, Topic], Any]) -> Callable[[], None]:
         return self.subscribe(Topic(re.compile(".*")), callback)  # type: ignore[arg-type]
 
-    def subscribe(  # type: ignore[override]
-        self, topic: Topic | str, callback: Callable[[bytes, Topic | str], Any]
+    def subscribe(
+        self, topic: Topic, callback: Callable[[bytes, Topic], None]
     ) -> Callable[[], None]:
         if self.l is None:
             logger.error("Tried to subscribe after LCM was closed")
@@ -165,8 +165,7 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
 
             return noop
 
-        # Handle both Topic objects and raw strings
-        if isinstance(topic, Topic) and topic.is_pattern:
+        if topic.is_pattern:
 
             def handler(channel: str, msg: bytes) -> None:
                 if channel == "LCM_SELF_TEST":
@@ -179,7 +178,7 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
 
             lcm_subscription = self.l.subscribe(pattern_str, handler)
         else:
-            topic_str = str(topic) if isinstance(topic, Topic) else topic
+            topic_str = str(topic)
             lcm_subscription = self.l.subscribe(topic_str, lambda _, msg: callback(msg, topic))
 
         # Set queue capacity to 10000 to handle high-volume bursts
@@ -191,6 +190,10 @@ class LCMPubSubBase(LCMService, AllPubSub[Topic, Any]):
             self.l.unsubscribe(lcm_subscription)
 
         return unsubscribe
+
+
+# these ignoress might be unsolvable
+# and should use composition not inheritance for encoding/decoding
 
 
 class LCM(  # type: ignore[misc]

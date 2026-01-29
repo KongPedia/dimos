@@ -73,7 +73,7 @@ class pLCMTransport(PubSubTransport[T]):
     ) -> Callable[[], None]:
         if not self._started:
             self.start()
-        return self.lcm.subscribe(self.topic, lambda msg, topic: callback(msg))
+        return self.lcm.subscribe(LCMTopic(self.topic), lambda msg, topic: callback(msg))
 
     def start(self) -> None:
         self.lcm.start()
