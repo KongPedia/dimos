@@ -48,6 +48,7 @@ __all__ = [
     "TFSpec",
     "Transport",
     "ZenohTransport",
+    "colors",
     "pLCMTransport",
     "pSHMTransport",
     "rpc",

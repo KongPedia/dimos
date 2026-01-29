@@ -516,7 +516,7 @@ def _rodrigues(x, inverse: bool = False):  # type: ignore[no-untyped-def]
 def _undistort_points_cuda(
     img_px: cp.ndarray, K: cp.ndarray, dist: cp.ndarray, iterations: int = 8
 ) -> cp.ndarray:
-    """Iteratively undistort pixel coordinates on device (Brown–Conrady).
+    """Iteratively undistort pixel coordinates on device (Brown-Conrady).
 
     Returns pixel coordinates after undistortion (fx*xu+cx, fy*yu+cy).
     """
