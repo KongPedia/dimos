@@ -17,12 +17,16 @@
 
 all_blueprints = {
     "coordinator-basic": "dimos.control.blueprints:coordinator_basic",
+    "coordinator-cartesian-ik-mock": "dimos.control.blueprints:coordinator_cartesian_ik_mock",
+    "coordinator-cartesian-ik-piper": "dimos.control.blueprints:coordinator_cartesian_ik_piper",
+    "coordinator-combined-xarm6": "dimos.control.blueprints:coordinator_combined_xarm6",
     "coordinator-dual-mock": "dimos.control.blueprints:coordinator_dual_mock",
     "coordinator-dual-xarm": "dimos.control.blueprints:coordinator_dual_xarm",
-    "coordinator-highfreq-mock": "dimos.control.blueprints:coordinator_highfreq_mock",
     "coordinator-mock": "dimos.control.blueprints:coordinator_mock",
     "coordinator-piper": "dimos.control.blueprints:coordinator_piper",
     "coordinator-piper-xarm": "dimos.control.blueprints:coordinator_piper_xarm",
+    "coordinator-teleop-xarm6": "dimos.control.blueprints:coordinator_teleop_xarm6",
+    "coordinator-velocity-xarm6": "dimos.control.blueprints:coordinator_velocity_xarm6",
     "coordinator-xarm6": "dimos.control.blueprints:coordinator_xarm6",
     "coordinator-xarm7": "dimos.control.blueprints:coordinator_xarm7",
     "demo-camera": "dimos.hardware.sensors.camera.module:demo_camera",

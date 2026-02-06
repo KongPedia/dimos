@@ -182,6 +182,6 @@ class Metric3D(LocalModel):
             gt_depth = torch.from_numpy(gt_depth_scaled).float().to(self.device)
             assert gt_depth.shape == pred_depth.shape
 
-            mask = gt_depth > 1e-8
-            abs_rel_err = (torch.abs(pred_depth[mask] - gt_depth[mask]) / gt_depth[mask]).mean()
+            mask = gt_depth > 1e-8  # type: ignore[operator]
+            abs_rel_err = (torch.abs(pred_depth[mask] - gt_depth[mask]) / gt_depth[mask]).mean()  # type: ignore[index]
             print("abs_rel_err:", abs_rel_err.item())

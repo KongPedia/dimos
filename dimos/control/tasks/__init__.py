@@ -14,12 +14,30 @@
 
 """Task implementations for the ControlCoordinator."""
 
+from dimos.control.tasks.cartesian_ik_task import (
+    CartesianIKTask,
+    CartesianIKTaskConfig,
+)
+from dimos.control.tasks.servo_task import (
+    JointServoTask,
+    JointServoTaskConfig,
+)
 from dimos.control.tasks.trajectory_task import (
     JointTrajectoryTask,
     JointTrajectoryTaskConfig,
 )
+from dimos.control.tasks.velocity_task import (
+    JointVelocityTask,
+    JointVelocityTaskConfig,
+)
 
 __all__ = [
+    "CartesianIKTask",
+    "CartesianIKTaskConfig",
+    "JointServoTask",
+    "JointServoTaskConfig",
     "JointTrajectoryTask",
     "JointTrajectoryTaskConfig",
+    "JointVelocityTask",
+    "JointVelocityTaskConfig",
 ]

@@ -26,30 +26,15 @@ Usage:
     from dimos.control.blueprints import coordinator_mock
     coordinator = coordinator_mock.build()
     coordinator.loop()
-
-Example with trajectory setter:
-    # Terminal 1: Run the coordinator
-    dimos run coordinator-mock
-
-    # Terminal 2: Send trajectories via RPC
-    python -m dimos.control.examples.coordinator_trajectory_setter --task traj_arm
 """
 
 from __future__ import annotations
 
 from dimos.control.components import HardwareComponent, HardwareType, make_joints
-from dimos.control.coordinator import (
-    TaskConfig,
-    control_coordinator,
-)
+from dimos.control.coordinator import TaskConfig, control_coordinator
 from dimos.core.transport import LCMTransport
+from dimos.msgs.geometry_msgs import PoseStamped
 from dimos.msgs.sensor_msgs import JointState
-
-
-def _joint_names(hardware_id: str, dof: int) -> list[str]:
-    """Generate joint names for a hardware component."""
-    return [f"{hardware_id}_joint{i + 1}" for i in range(dof)]
-
 
 # =============================================================================
 # Single Arm Blueprints
@@ -72,7 +57,7 @@ coordinator_mock = control_coordinator(
         TaskConfig(
             name="traj_arm",
             type="trajectory",
-            joint_names=_joint_names("arm", 7),
+            joint_names=[f"arm_joint{i + 1}" for i in range(7)],
             priority=10,
         ),
     ],
@@ -82,7 +67,7 @@ coordinator_mock = control_coordinator(
     }
 )
 
-# XArm7 real hardware (requires IP configuration)
+# XArm7 real hardware
 coordinator_xarm7 = control_coordinator(
     tick_rate=100.0,
     publish_joint_state=True,
@@ -93,7 +78,7 @@ coordinator_xarm7 = control_coordinator(
             hardware_type=HardwareType.MANIPULATOR,
             joints=make_joints("arm", 7),
             adapter_type="xarm",
-            address="192.168.2.235",  # Default IP, override via env or config
+            address="192.168.2.235",
             auto_enable=True,
         ),
     ],
@@ -101,7 +86,7 @@ coordinator_xarm7 = control_coordinator(
         TaskConfig(
             name="traj_arm",
             type="trajectory",
-            joint_names=_joint_names("arm", 7),
+            joint_names=[f"arm_joint{i + 1}" for i in range(7)],
             priority=10,
         ),
     ],
@@ -130,7 +115,7 @@ coordinator_xarm6 = control_coordinator(
         TaskConfig(
             name="traj_xarm",
             type="trajectory",
-            joint_names=_joint_names("arm", 6),
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
@@ -159,7 +144,7 @@ coordinator_piper = control_coordinator(
         TaskConfig(
             name="traj_piper",
             type="trajectory",
-            joint_names=_joint_names("arm", 6),
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
@@ -169,11 +154,12 @@ coordinator_piper = control_coordinator(
     }
 )
 
+
 # =============================================================================
 # Dual Arm Blueprints
 # =============================================================================
 
-# Dual mock arms (7-DOF left, 6-DOF right) for testing
+# Dual mock arms (7-DOF left, 6-DOF right)
 coordinator_dual_mock = control_coordinator(
     tick_rate=100.0,
     publish_joint_state=True,
@@ -196,13 +182,13 @@ coordinator_dual_mock = control_coordinator(
         TaskConfig(
             name="traj_left",
             type="trajectory",
-            joint_names=_joint_names("left_arm", 7),
+            joint_names=[f"left_arm_joint{i + 1}" for i in range(7)],
             priority=10,
         ),
         TaskConfig(
             name="traj_right",
             type="trajectory",
-            joint_names=_joint_names("right_arm", 6),
+            joint_names=[f"right_arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
@@ -212,7 +198,7 @@ coordinator_dual_mock = control_coordinator(
     }
 )
 
-# Dual XArm setup (XArm7 left, XArm6 right)
+# Dual XArm (XArm7 left, XArm6 right)
 coordinator_dual_xarm = control_coordinator(
     tick_rate=100.0,
     publish_joint_state=True,
@@ -239,13 +225,13 @@ coordinator_dual_xarm = control_coordinator(
         TaskConfig(
             name="traj_left",
             type="trajectory",
-            joint_names=_joint_names("left_arm", 7),
+            joint_names=[f"left_arm_joint{i + 1}" for i in range(7)],
             priority=10,
         ),
         TaskConfig(
             name="traj_right",
             type="trajectory",
-            joint_names=_joint_names("right_arm", 6),
+            joint_names=[f"right_arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
@@ -255,7 +241,7 @@ coordinator_dual_xarm = control_coordinator(
     }
 )
 
-# Dual Arm setup (XArm6 , Piper )
+# Dual arm (XArm6 + Piper)
 coordinator_piper_xarm = control_coordinator(
     tick_rate=100.0,
     publish_joint_state=True,
@@ -282,13 +268,13 @@ coordinator_piper_xarm = control_coordinator(
         TaskConfig(
             name="traj_xarm",
             type="trajectory",
-            joint_names=_joint_names("xarm_arm", 6),
+            joint_names=[f"xarm_arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
         TaskConfig(
             name="traj_piper",
             type="trajectory",
-            joint_names=_joint_names("piper_arm", 6),
+            joint_names=[f"piper_arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
@@ -298,42 +284,192 @@ coordinator_piper_xarm = control_coordinator(
     }
 )
 
+
 # =============================================================================
-# High-frequency Blueprints (200Hz)
+# Streaming Control Blueprints
 # =============================================================================
 
-# High-frequency mock for demanding applications
-coordinator_highfreq_mock = control_coordinator(
-    tick_rate=200.0,
+# XArm6 teleop - streaming position control
+coordinator_teleop_xarm6 = control_coordinator(
+    tick_rate=100.0,
     publish_joint_state=True,
     joint_state_frame_id="coordinator",
     hardware=[
         HardwareComponent(
             hardware_id="arm",
             hardware_type=HardwareType.MANIPULATOR,
-            joints=make_joints("arm", 7),
-            adapter_type="mock",
+            joints=make_joints("arm", 6),
+            adapter_type="xarm",
+            address="192.168.1.210",
+            auto_enable=True,
         ),
     ],
     tasks=[
         TaskConfig(
-            name="traj_arm",
-            type="trajectory",
-            joint_names=_joint_names("arm", 7),
+            name="servo_arm",
+            type="servo",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
             priority=10,
         ),
     ],
 ).transports(
     {
         ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+        ("joint_command", JointState): LCMTransport("/teleop/joint_command", JointState),
     }
 )
 
+# XArm6 velocity control - streaming velocity for joystick
+coordinator_velocity_xarm6 = control_coordinator(
+    tick_rate=100.0,
+    publish_joint_state=True,
+    joint_state_frame_id="coordinator",
+    hardware=[
+        HardwareComponent(
+            hardware_id="arm",
+            hardware_type=HardwareType.MANIPULATOR,
+            joints=make_joints("arm", 6),
+            adapter_type="xarm",
+            address="192.168.1.210",
+            auto_enable=True,
+        ),
+    ],
+    tasks=[
+        TaskConfig(
+            name="velocity_arm",
+            type="velocity",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
+            priority=10,
+        ),
+    ],
+).transports(
+    {
+        ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+        ("joint_command", JointState): LCMTransport("/joystick/joint_command", JointState),
+    }
+)
+
+# XArm6 combined (servo + velocity tasks)
+coordinator_combined_xarm6 = control_coordinator(
+    tick_rate=100.0,
+    publish_joint_state=True,
+    joint_state_frame_id="coordinator",
+    hardware=[
+        HardwareComponent(
+            hardware_id="arm",
+            hardware_type=HardwareType.MANIPULATOR,
+            joints=make_joints("arm", 6),
+            adapter_type="xarm",
+            address="192.168.1.210",
+            auto_enable=True,
+        ),
+    ],
+    tasks=[
+        TaskConfig(
+            name="servo_arm",
+            type="servo",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
+            priority=10,
+        ),
+        TaskConfig(
+            name="velocity_arm",
+            type="velocity",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
+            priority=10,
+        ),
+    ],
+).transports(
+    {
+        ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+        ("joint_command", JointState): LCMTransport("/control/joint_command", JointState),
+    }
+)
+
+
 # =============================================================================
-# Raw Blueprints (no hardware/tasks configured - for programmatic setup)
+# Cartesian IK Blueprints (internal Pinocchio IK solver)
 # =============================================================================
 
-# Basic coordinator with transport only (add hardware/tasks programmatically)
+
+def _get_piper_model_path() -> str:
+    """Get path to Piper MJCF model for IK solver."""
+    from dimos.utils.data import get_data
+
+    piper_path = get_data("piper_description")
+    return str(piper_path / "mujoco_model" / "piper_no_gripper_description.xml")
+
+
+# Mock 6-DOF arm with CartesianIK
+coordinator_cartesian_ik_mock = control_coordinator(
+    tick_rate=100.0,
+    publish_joint_state=True,
+    joint_state_frame_id="coordinator",
+    hardware=[
+        HardwareComponent(
+            hardware_id="arm",
+            hardware_type=HardwareType.MANIPULATOR,
+            joints=make_joints("arm", 6),
+            adapter_type="mock",
+        ),
+    ],
+    tasks=[
+        TaskConfig(
+            name="cartesian_ik_arm",
+            type="cartesian_ik",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
+            priority=10,
+            model_path=_get_piper_model_path(),
+            ee_joint_id=6,
+        ),
+    ],
+).transports(
+    {
+        ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+        ("cartesian_command", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+    }
+)
+
+# Piper arm with CartesianIK
+coordinator_cartesian_ik_piper = control_coordinator(
+    tick_rate=100.0,
+    publish_joint_state=True,
+    joint_state_frame_id="coordinator",
+    hardware=[
+        HardwareComponent(
+            hardware_id="arm",
+            hardware_type=HardwareType.MANIPULATOR,
+            joints=make_joints("arm", 6),
+            adapter_type="piper",
+            address="can0",
+            auto_enable=True,
+        ),
+    ],
+    tasks=[
+        TaskConfig(
+            name="cartesian_ik_arm",
+            type="cartesian_ik",
+            joint_names=[f"arm_joint{i + 1}" for i in range(6)],
+            priority=10,
+            model_path=_get_piper_model_path(),
+            ee_joint_id=6,
+        ),
+    ],
+).transports(
+    {
+        ("joint_state", JointState): LCMTransport("/coordinator/joint_state", JointState),
+        ("cartesian_command", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+    }
+)
+
+
+# =============================================================================
+# Raw Blueprints (for programmatic setup)
+# =============================================================================
+
 coordinator_basic = control_coordinator(
     tick_rate=100.0,
     publish_joint_state=True,
@@ -345,18 +481,27 @@ coordinator_basic = control_coordinator(
 )
 
 
+# =============================================================================
+# Exports
+# =============================================================================
+
 __all__ = [
-    # Raw blueprints (for programmatic setup)
+    # Raw
     "coordinator_basic",
-    # Dual arm blueprints
+    # Cartesian IK
+    "coordinator_cartesian_ik_mock",
+    "coordinator_cartesian_ik_piper",
+    # Streaming control
+    "coordinator_combined_xarm6",
+    # Dual arm
     "coordinator_dual_mock",
     "coordinator_dual_xarm",
-    # High-frequency blueprints
-    "coordinator_highfreq_mock",
-    # Single arm blueprints
+    # Single arm
     "coordinator_mock",
     "coordinator_piper",
     "coordinator_piper_xarm",
+    "coordinator_teleop_xarm6",
+    "coordinator_velocity_xarm6",
     "coordinator_xarm6",
     "coordinator_xarm7",
 ]
