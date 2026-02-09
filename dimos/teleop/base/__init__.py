@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .Bool import Bool
-from .Header import Header
-from .Int8 import Int8
-from .Int32 import Int32
-from .UInt32 import UInt32
+"""Teleoperation protocol."""
 
-__all__ = ["Bool", "Header", "Int8", "Int32", "UInt32"]
+from dimos.teleop.base.teleop_protocol import TeleopProtocol
+
+__all__ = ["TeleopProtocol"]

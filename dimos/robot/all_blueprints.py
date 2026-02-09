@@ -16,6 +16,8 @@
 # Run `pytest dimos/robot/test_all_blueprints_generation.py` to regenerate.
 
 all_blueprints = {
+    "arm-teleop": "dimos.teleop.blueprints:arm_teleop",
+    "arm-teleop-visualizing": "dimos.teleop.blueprints:arm_teleop_visualizing",
     "coordinator-basic": "dimos.control.blueprints:coordinator_basic",
     "coordinator-cartesian-ik-mock": "dimos.control.blueprints:coordinator_cartesian_ik_mock",
     "coordinator-cartesian-ik-piper": "dimos.control.blueprints:coordinator_cartesian_ik_piper",
@@ -65,6 +67,7 @@ all_blueprints = {
 
 
 all_modules = {
+    "arm_teleop_module": "dimos.teleop.quest.quest_extensions",
     "camera_module": "dimos.hardware.sensors.camera.module",
     "cartesian_motion_controller": "dimos.manipulation.control.servo_control.cartesian_motion_controller",
     "control_coordinator": "dimos.control.coordinator",
@@ -94,6 +97,7 @@ all_modules = {
     "osm_skill": "dimos.agents.skills.osm",
     "person_follow_skill": "dimos.agents.skills.person_follow",
     "person_tracker_module": "dimos.perception.detection.person_tracker",
+    "quest_teleop_module": "dimos.teleop.quest.quest_teleop_module",
     "realsense_camera": "dimos.hardware.sensors.camera.realsense.camera",
     "replanning_a_star_planner": "dimos.navigation.replanning_a_star.module",
     "rerun_scene_wiring": "dimos.dashboard.rerun_scene_wiring",
@@ -101,8 +105,10 @@ all_modules = {
     "spatial_memory": "dimos.perception.spatial_perception",
     "speak_skill": "dimos.agents.skills.speak_skill",
     "temporal_memory": "dimos.perception.experimental.temporal_memory.temporal_memory",
+    "twist_teleop_module": "dimos.teleop.quest.quest_extensions",
     "unitree_skills": "dimos.robot.unitree_webrtc.unitree_skill_container",
     "utilization": "dimos.utils.monitoring",
+    "visualizing_teleop_module": "dimos.teleop.quest.quest_extensions",
     "vlm_agent": "dimos.agents.vlm_agent",
     "vlm_stream_tester": "dimos.agents.vlm_stream_tester",
     "voxel_mapper": "dimos.mapping.voxels",
