@@ -28,9 +28,9 @@ from typing import TYPE_CHECKING, Any
 from dimos.core.docker_build import build_image, image_exists
 from dimos.core.module import Module, ModuleConfig
 from dimos.core.rpc_client import RpcCall
-from dimos.dashboard.rerun_init import RERUN_GRPC_PORT, RERUN_WEB_PORT
 from dimos.protocol.rpc import LCMRPC
 from dimos.utils.logging_config import setup_logger
+from dimos.visualization.rerun.bridge import RERUN_GRPC_PORT, RERUN_WEB_PORT
 
 if TYPE_CHECKING:
     from collections.abc import Callable

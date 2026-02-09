@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 from dataclasses import dataclass
 from functools import cached_property
 
 import torch
 import torch.nn.functional as functional
+
+warnings.filterwarnings("ignore", message="Cython evaluation.*unavailable", category=UserWarning)
 from torchreid import utils as torchreid_utils
 
 from dimos.models.base import LocalModel

@@ -21,33 +21,12 @@ from typing import TYPE_CHECKING
 
 import rerun as rr
 
-from dimos.dashboard.rerun_init import connect_rerun
 from dimos.utils.logging_config import setup_logger
 
 if TYPE_CHECKING:
-    from dimos.core.global_config import GlobalConfig
     from dimos.msgs.geometry_msgs import PoseStamped
 
 logger = setup_logger()
-
-
-def init_rerun_visualization(global_config: GlobalConfig | None = None) -> bool:
-    """Initialize Rerun visualization connection."""
-    if global_config is None:
-        from dimos.core.global_config import GlobalConfig as GC
-
-        global_config = GC()
-    if not global_config.viewer_backend.startswith("rerun"):
-        logger.debug(f"Skipping Rerun init: viewer_backend={global_config.viewer_backend}")
-        return False
-
-    try:
-        connect_rerun(global_config=global_config)
-        logger.info("Connected to Rerun for teleop visualization")
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to connect to Rerun: {e}")
-        return False
 
 
 def visualize_pose(pose_stamped: PoseStamped, controller_label: str) -> None:
@@ -77,4 +56,4 @@ def visualize_buttons(
         logger.debug(f"Failed to log {controller_label} buttons to Rerun: {e}")
 
 
-__all__ = ["init_rerun_visualization", "visualize_buttons", "visualize_pose"]
+__all__ = ["visualize_buttons", "visualize_pose"]

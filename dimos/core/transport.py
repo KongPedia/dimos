@@ -37,6 +37,26 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")  # type: ignore[misc]
 
+# TODO
+# Transports need to be rewritten and simplified,
+#
+# there is no need for them to get a reference to "a stream" on publish/subscribe calls
+# this is a legacy from dask transports.
+#
+# new transport should literally have 2 functions (next to start/stop)
+# "send(msg)" and "receive(callback)" and that's all
+#
+# we can also consider pubsubs conforming directly to Transport specs
+# and removing PubSubTransport glue entirely
+#
+# Why not ONLY pubsubs without Transport abstraction?
+#
+# General idea for transports (and why they exist at all)
+# is that they can be * anything * like
+#
+# a web camera rtsp stream for Image, audio stream from mic, etc
+# http binary streams, tcp connections etc
+
 
 class PubSubTransport(Transport[T]):
     topic: Any

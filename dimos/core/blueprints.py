@@ -23,10 +23,7 @@ import sys
 from types import MappingProxyType
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
-import rerun as rr
-import rerun.blueprint as rrb
-
-from dimos.core.global_config import GlobalConfig
+from dimos.core.global_config import GlobalConfig, global_config
 from dimos.core.module import Module, is_module_type
 from dimos.core.module_coordinator import ModuleCoordinator
 from dimos.core.stream import In, Out
@@ -262,8 +259,8 @@ class Blueprint:
         for blueprint in self.blueprints:
             kwargs = {**blueprint.kwargs}
             sig = inspect.signature(blueprint.module.__init__)
-            if "global_config" in sig.parameters:
-                kwargs["global_config"] = global_config
+            if "cfg" in sig.parameters:
+                kwargs["cfg"] = global_config
             module_specs.append((blueprint.module, blueprint.args, kwargs))
 
         module_coordinator.deploy_parallel(module_specs)
@@ -456,78 +453,18 @@ class Blueprint:
                     requested_method_name, rpc_methods_dot[requested_method_name]
                 )
 
-    def _init_rerun_blueprint(self, module_coordinator: ModuleCoordinator) -> None:
-        """Compose and send Rerun blueprint from module contributions.
-
-        Collects rerun_views() from all modules and composes them into a unified layout.
-        """
-        # Collect view contributions from all modules
-        side_panels = []
-        for blueprint in self.blueprints:
-            if hasattr(blueprint.module, "rerun_views"):
-                views = blueprint.module.rerun_views()
-                if views:
-                    side_panels.extend(views)
-
-        # Always include latency panel if we have any panels
-        if side_panels:
-            side_panels.append(
-                rrb.TimeSeriesView(
-                    name="Latency (ms)",
-                    origin="/metrics",
-                    contents=[
-                        "+ /metrics/voxel_map/latency_ms",
-                        "+ /metrics/costmap/latency_ms",
-                    ],
-                )
-            )
-
-        # Compose final layout
-        if side_panels:
-            composed_blueprint = rrb.Blueprint(
-                rrb.Horizontal(
-                    rrb.Spatial3DView(
-                        name="3D View",
-                        origin="world",
-                        background=[0, 0, 0],
-                    ),
-                    rrb.Vertical(*side_panels, row_shares=[2] + [1] * (len(side_panels) - 1)),
-                    column_shares=[3, 1],
-                ),
-                rrb.TimePanel(state="collapsed"),
-                rrb.SelectionPanel(state="collapsed"),
-                rrb.BlueprintPanel(state="collapsed"),
-            )
-            rr.send_blueprint(composed_blueprint)
-
-    def _start_rerun(self, global_config: GlobalConfig) -> None:
-        # Initialize Rerun server before deploying modules (if backend is Rerun)
-        if global_config.rerun_enabled and global_config.viewer_backend.startswith("rerun"):
-            try:
-                from dimos.dashboard.rerun_init import init_rerun_server
-
-                server_addr = init_rerun_server(viewer_mode=global_config.viewer_backend)
-                global_config.model_copy(update={"rerun_server_addr": server_addr})
-                logger.info("Rerun server initialized", addr=server_addr)
-            except Exception as e:
-                logger.warning(f"Failed to initialize Rerun server: {e}")
-
     def build(
         self,
-        global_config: GlobalConfig | None = None,
         cli_config_overrides: Mapping[str, Any] | None = None,
     ) -> ModuleCoordinator:
-        if global_config is None:
-            global_config = GlobalConfig()
-        global_config = global_config.model_copy(update=dict(self.global_config_overrides))
+        global_config.update(**dict(self.global_config_overrides))
         if cli_config_overrides:
-            global_config = global_config.model_copy(update=dict(cli_config_overrides))
+            global_config.update(**dict(cli_config_overrides))
 
         self._check_requirements()
         self._verify_no_name_conflicts()
-        self._start_rerun(global_config)
 
-        module_coordinator = ModuleCoordinator(global_config=global_config)
+        module_coordinator = ModuleCoordinator(cfg=global_config)
         module_coordinator.start()
 
         # all module constructors are called here (each of them setup their own)
@@ -537,10 +474,6 @@ class Blueprint:
         self._connect_module_refs(module_coordinator)
 
         module_coordinator.start_all_modules()
-
-        # Compose and send Rerun blueprint from module contributions
-        if global_config.viewer_backend.startswith("rerun"):
-            self._init_rerun_blueprint(module_coordinator)
 
         return module_coordinator
 

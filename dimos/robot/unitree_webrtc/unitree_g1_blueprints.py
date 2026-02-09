@@ -31,7 +31,6 @@ from dimos.agents.skills.navigation import navigation_skill
 from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
 from dimos.core.blueprints import autoconnect
 from dimos.core.transport import LCMTransport, pSHMTransport
-from dimos.dashboard.tf_rerun_module import tf_rerun
 from dimos.hardware.sensors.camera import zed
 from dimos.hardware.sensors.camera.module import camera_module  # type: ignore[attr-defined]
 from dimos.hardware.sensors.camera.webcam import Webcam
@@ -87,12 +86,6 @@ _basic_no_nav = (
         # Visualization
         websocket_vis(),
         foxglove_bridge(),
-        tf_rerun(
-            robot_frame="base_link",
-            cameras=[
-                ("world/robot/camera", "camera_optical", zed.CameraInfo.SingleWebcam),
-            ],
-        ),
     )
     .global_config(n_dask_workers=4, robot_model="unitree_g1")
     .transports(

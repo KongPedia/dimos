@@ -17,10 +17,12 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
 MsgT = TypeVar("MsgT")
 TopicT = TypeVar("TopicT")
+MsgT_co = TypeVar("MsgT_co", covariant=True)
+TopicT_co = TypeVar("TopicT_co", covariant=True)
 
 
 class PubSubBaseMixin(Generic[TopicT, MsgT]):
@@ -175,3 +177,15 @@ class DiscoveryPubSub(PubSub[TopicT, MsgT], ABC):
                 unsub()
 
         return unsubscribe_all
+
+
+@runtime_checkable
+class SubscribeAllCapable(Protocol[MsgT_co, TopicT_co]):
+    """Protocol for pubsubs that support subscribe_all.
+
+    Both AllPubSub (native) and DiscoveryPubSub (synthesized) satisfy this.
+    """
+
+    def subscribe_all(self, callback: Callable[[Any, Any], Any]) -> Callable[[], None]:
+        """Subscribe to all messages on all topics."""
+        ...

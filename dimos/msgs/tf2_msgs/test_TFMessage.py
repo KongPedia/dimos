@@ -70,6 +70,38 @@ def test_tfmessage_add_transform() -> None:
     assert msg[0] == tf
 
 
+def test_tfmessage_tree() -> None:
+    """Test adding transforms to TFMessage."""
+    msg = TFMessage()
+
+    msg.add_transform(
+        Transform(
+            translation=Vector3(1, 2, 0.5), frame_id="world", child_frame_id="robot", ts=200.0
+        )
+    )
+    msg.add_transform(
+        Transform(
+            translation=Vector3(0.1, 0, 1.0), frame_id="robot", child_frame_id="camera", ts=200.0
+        )
+    )
+    msg.add_transform(
+        Transform(
+            translation=Vector3(0.2, 0, 0.2), frame_id="robot", child_frame_id="lidar", ts=200.0
+        )
+    )
+    msg.add_transform(
+        Transform(
+            translation=Vector3(0.05, 0, 0.0),
+            frame_id="lidar",
+            child_frame_id="lidar_scanner",
+            ts=200.0,
+        )
+    )
+
+    assert len(msg) == 4
+    print(msg)
+
+
 def test_tfmessage_lcm_encode_decode() -> None:
     """Test encoding TFMessage to LCM bytes."""
     # Create transforms

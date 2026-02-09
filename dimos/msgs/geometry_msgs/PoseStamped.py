@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import math
 import time
-from typing import BinaryIO, TypeAlias
+from typing import TYPE_CHECKING, BinaryIO, TypeAlias
+
+if TYPE_CHECKING:
+    from rerun._baseclasses import Archetype
 
 from dimos_lcm.geometry_msgs import PoseStamped as LCMPoseStamped
 
@@ -27,7 +30,6 @@ try:
 except ImportError:
     ROSPoseStamped = None  # type: ignore[assignment, misc]
 from plum import dispatch
-import rerun as rr
 
 from dimos.msgs.geometry_msgs.Pose import Pose
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion, QuaternionConvertable
@@ -87,12 +89,14 @@ class PoseStamped(Pose, Timestamped):
             f"euler=[{math.degrees(self.roll):.1f}, {math.degrees(self.pitch):.1f}, {math.degrees(self.yaw):.1f}])"
         )
 
-    def to_rerun(self):  # type: ignore[no-untyped-def]
+    def to_rerun(self) -> Archetype:
         """Convert to rerun Transform3D format.
 
         Returns a Transform3D that can be logged to Rerun to position
         child entities in the transform hierarchy.
         """
+        import rerun as rr
+
         return rr.Transform3D(
             translation=[self.x, self.y, self.z],
             rotation=rr.Quaternion(
@@ -107,6 +111,8 @@ class PoseStamped(Pose, Timestamped):
 
     def to_rerun_arrow(self, length: float = 0.5):  # type: ignore[no-untyped-def]
         """Convert to rerun Arrows3D format for visualization."""
+        import rerun as rr
+
         origin = [[self.x, self.y, self.z]]
         forward = self.orientation.rotate_vector(Vector3(length, 0, 0))
         vector = [[forward.x, forward.y, forward.z]]

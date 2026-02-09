@@ -23,6 +23,7 @@ from dimos.protocol.pubsub.encoders import (
     LCMEncoderMixin,
     PickleEncoderMixin,
 )
+from dimos.protocol.pubsub.patterns import Glob
 from dimos.protocol.pubsub.spec import AllPubSub
 from dimos.protocol.service.lcmservice import LCMConfig, LCMService, autoconf
 from dimos.utils.logging_config import setup_logger
@@ -34,62 +35,6 @@ if TYPE_CHECKING:
     from dimos.msgs import DimosMsg
 
 logger = setup_logger()
-
-
-class Glob:
-    """Glob pattern that compiles to regex for LCM subscriptions.
-
-    Supports:
-        * - matches any characters except /
-        ** - matches any characters including /
-        ? - matches single character
-
-    Example:
-        Topic(topic=Glob("/sensor/*"))  # matches /sensor/temp, /sensor/humidity
-        Topic(topic=Glob("/robot/**"))  # matches /robot/arm/joint1, /robot/leg/motor
-    """
-
-    def __init__(self, pattern: str) -> None:
-        self._glob = pattern
-        self._regex = self._compile(pattern)
-
-    @staticmethod
-    def _compile(pattern: str) -> str:
-        """Convert glob pattern to regex."""
-        result = []
-        i = 0
-        while i < len(pattern):
-            c = pattern[i]
-            if c == "*":
-                if i + 1 < len(pattern) and pattern[i + 1] == "*":
-                    result.append(".*")
-                    i += 2
-                else:
-                    result.append("[^/]*")
-                    i += 1
-            elif c == "?":
-                result.append(".")
-                i += 1
-            elif c in r"\^$.|+[]{}()":
-                result.append("\\" + c)
-                i += 1
-            else:
-                result.append(c)
-                i += 1
-        return "".join(result)
-
-    @property
-    def pattern(self) -> str:
-        """Return the regex pattern string."""
-        return self._regex
-
-    @property
-    def glob(self) -> str:
-        """Return the original glob pattern."""
-        return self._glob
-
-    def __repr__(self) -> str:
-        return f"Glob({self._glob!r})"
 
 
 @dataclass

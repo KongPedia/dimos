@@ -25,7 +25,8 @@ from typing import Any, Generic, TypeVar
 import pytest
 
 from dimos.msgs.geometry_msgs import Pose, Quaternion, Vector3
-from dimos.protocol.pubsub.impl.lcmpubsub import LCM, Glob, LCMPubSubBase, Topic
+from dimos.protocol.pubsub.impl.lcmpubsub import LCM, LCMPubSubBase, Topic
+from dimos.protocol.pubsub.patterns import Glob
 from dimos.protocol.pubsub.spec import AllPubSub, PubSub
 
 TopicT = TypeVar("TopicT")

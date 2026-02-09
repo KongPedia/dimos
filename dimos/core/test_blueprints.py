@@ -28,7 +28,6 @@ from dimos.core.blueprints import (
     autoconnect,
 )
 from dimos.core.core import rpc
-from dimos.core.global_config import GlobalConfig
 from dimos.core.module import Module
 from dimos.core.module_coordinator import ModuleCoordinator
 from dimos.core.rpc_client import RpcCall
@@ -40,7 +39,7 @@ from dimos.spec.utils import Spec
 
 # Disable Rerun for tests (prevents viewer spawn and gRPC flush errors)
 _BUILD_WITHOUT_RERUN = {
-    "global_config": GlobalConfig(rerun_enabled=False, viewer_backend="foxglove"),
+    "cli_config_overrides": {"viewer_backend": "none"},
 }
 
 

@@ -30,13 +30,14 @@ try:
     from nav_msgs.msg import Path as ROSPath  # type: ignore[attr-defined]
 except ImportError:
     ROSPath = None  # type: ignore[assignment, misc]
-import rerun as rr
 
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.types.timestamped import Timestamped
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from rerun._baseclasses import Archetype
 
 
 def sec_nsec(ts):  # type: ignore[no-untyped-def]
@@ -233,12 +234,12 @@ class Path(Timestamped):
 
         return ros_msg
 
-    def to_rerun(  # type: ignore[no-untyped-def]
+    def to_rerun(
         self,
         color: tuple[int, int, int] = (0, 255, 128),
-        z_offset: float = 0.2,
+        z_offset: float = 0.5,
         radii: float = 0.05,
-    ):
+    ) -> Archetype:
         """Convert to rerun LineStrips3D format.
 
         Args:
@@ -249,6 +250,8 @@ class Path(Timestamped):
         Returns:
             rr.LineStrips3D archetype for logging to rerun
         """
+        import rerun as rr
+
         if not self.poses:
             return rr.LineStrips3D([])
 

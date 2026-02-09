@@ -15,6 +15,10 @@
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dimos.visualization.rerun.bridge import RerunData, RerunMulti
 
 # Import LCM types
 from dimos_lcm.sensor_msgs import CameraInfo as LCMCameraInfo
@@ -395,7 +399,20 @@ class CameraInfo(Timestamped):
             and self.frame_id == other.frame_id
         )
 
-    def to_rerun(self, image_plane_distance: float = 0.5):  # type: ignore[no-untyped-def]
+    def to_rerun(
+        self,
+        image_plane_distance: float = 1.0,
+        # These are defaults for a typical RGB camera with a known transform
+        #
+        # TODO this should be done by the actual emitting modules,
+        # they know the camera image topic, spatial relationships etc
+        #
+        # Poor CameraInfo class has no idea on this
+        # We just provide the parameters here for convenience in case your
+        # module doesn't implement this correctly
+        image_topic: str | None = None,
+        optical_frame: str | None = None,
+    ) -> RerunData:
         """Convert to Rerun Pinhole archetype for camera frustum visualization.
 
         Args:
@@ -411,13 +428,50 @@ class CameraInfo(Timestamped):
         fx, fy = self.K[0], self.K[4]
         cx, cy = self.K[2], self.K[5]
 
-        return rr.Pinhole(
+        pinhole = rr.Pinhole(
             focal_length=[fx, fy],
             principal_point=[cx, cy],
             width=self.width,
             height=self.height,
             image_plane_distance=image_plane_distance,
         )
+
+        # If no image topic is specified, We don't know which Image this CameraInfo refers to
+        # return just the pinhole
+        if not image_topic:
+            return pinhole
+
+        ret: RerunMulti = []
+
+        # Add pinhole under world/image_topic (we know which Image this CameraInfo refers to)
+        # Note: parent_frame is supposed to work according to:
+        # https://rerun.io/docs/reference/types/archetypes/pinhole
+        # But it doesn't, so we add the transform separately below
+        ret.append(
+            (
+                image_topic,
+                rr.Pinhole(
+                    focal_length=[fx, fy],
+                    principal_point=[cx, cy],
+                    width=self.width,
+                    height=self.height,
+                    image_plane_distance=image_plane_distance,
+                ),
+            )
+        )
+
+        if not optical_frame:
+            return ret
+
+        # Add 3d transform from optical frame to world/image_topic (We know where the camera is)
+        ret.append(
+            (
+                image_topic,
+                rr.Transform3D(parent_frame=f"tf#/{optical_frame}"),
+            )
+        )
+
+        return ret
 
 
 class CalibrationProvider:

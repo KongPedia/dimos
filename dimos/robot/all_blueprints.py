@@ -100,7 +100,7 @@ all_modules = {
     "quest_teleop_module": "dimos.teleop.quest.quest_teleop_module",
     "realsense_camera": "dimos.hardware.sensors.camera.realsense.camera",
     "replanning_a_star_planner": "dimos.navigation.replanning_a_star.module",
-    "rerun_scene_wiring": "dimos.dashboard.rerun_scene_wiring",
+    "rerun_bridge": "dimos.visualization.rerun.bridge",
     "ros_nav": "dimos.navigation.rosnav",
     "spatial_memory": "dimos.perception.spatial_perception",
     "speak_skill": "dimos.agents.skills.speak_skill",

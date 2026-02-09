@@ -15,7 +15,10 @@
 from __future__ import annotations
 
 import time
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
+
+if TYPE_CHECKING:
+    import rerun as rr
 
 from dimos_lcm.geometry_msgs import (
     Transform as LCMTransform,
@@ -34,7 +37,6 @@ except ImportError:
     ROSTransform = None  # type: ignore[assignment, misc]
     ROSVector3 = None  # type: ignore[assignment, misc]
     ROSQuaternion = None  # type: ignore[assignment, misc]
-import rerun as rr
 
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
@@ -361,17 +363,17 @@ class Transform(Timestamped):
             ts=ts,
         )
 
-    def to_rerun(self):  # type: ignore[no-untyped-def]
+    def to_rerun(self) -> rr.Transform3D:
         """Convert to rerun Transform3D format with frame IDs.
 
         Returns:
             rr.Transform3D archetype for logging to rerun with parent/child frames
         """
+        import rerun as rr
+
         return rr.Transform3D(
             translation=[self.translation.x, self.translation.y, self.translation.z],
-            rotation=rr.Quaternion(
-                xyzw=[self.rotation.x, self.rotation.y, self.rotation.z, self.rotation.w]
-            ),
-            parent_frame=self.frame_id,  # type: ignore[call-arg]
-            child_frame=self.child_frame_id,  # type: ignore[call-arg]
+            rotation=self.rotation.to_rerun(),
+            parent_frame="tf#/" + self.frame_id,
+            child_frame="tf#/" + self.child_frame_id,
         )

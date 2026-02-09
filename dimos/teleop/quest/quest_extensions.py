@@ -24,11 +24,10 @@ Available subclasses:
 from dataclasses import dataclass
 from typing import Any
 
-from dimos.core import Out, rpc
+from dimos.core import Out
 from dimos.msgs.geometry_msgs import PoseStamped, TwistStamped
 from dimos.teleop.quest.quest_teleop_module import Hand, QuestTeleopConfig, QuestTeleopModule
 from dimos.teleop.utils.teleop_visualization import (
-    init_rerun_visualization,
     visualize_buttons,
     visualize_pose,
 )
@@ -119,12 +118,6 @@ class VisualizingTeleopModule(ArmTeleopModule):
         - right_controller_output: PoseStamped (inherited)
         - buttons: QuestButtons (inherited)
     """
-
-    @rpc
-    def start(self) -> None:
-        """Start module and initialize Rerun visualization."""
-        super().start()
-        init_rerun_visualization()
 
     def _get_output_pose(self, hand: Hand) -> PoseStamped | None:
         """Get output pose and visualize in Rerun."""

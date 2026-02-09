@@ -47,6 +47,8 @@ from dimos.msgs.geometry_msgs.Vector3 import Vector3
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from dimos.visualization.rerun.bridge import RerunMulti
+
 
 class TFMessage:
     """TFMessage that accepts Transform objects and encodes to LCM format."""
@@ -125,7 +127,9 @@ class TFMessage:
     def __str__(self) -> str:
         lines = [f"TFMessage with {len(self.transforms)} transforms:"]
         for i, transform in enumerate(self.transforms):
-            lines.append(f"  [{i}] {transform.frame_id} @ {transform.ts:.3f}")
+            lines.append(
+                f"  [{i}] {transform.frame_id} → {transform.child_frame_id} @ {transform.ts:.3f}"
+            )
         return "\n".join(lines)
 
     @classmethod
@@ -160,7 +164,7 @@ class TFMessage:
 
         return ros_msg
 
-    def to_rerun(self):  # type: ignore[no-untyped-def]
+    def to_rerun(self) -> RerunMulti:
         """Convert to a list of rerun Transform3D archetypes.
 
         Returns a list of tuples (entity_path, Transform3D) for each transform
@@ -176,8 +180,8 @@ class TFMessage:
             for path, transform in tf_msg.to_rerun():
                 rr.log(path, transform)
         """
-        results = []
+        results: RerunMulti = []
         for transform in self.transforms:
             entity_path = f"world/tf/{transform.child_frame_id}"
-            results.append((entity_path, transform.to_rerun()))  # type: ignore[no-untyped-call]
+            results.append((entity_path, transform.to_rerun()))
         return results
