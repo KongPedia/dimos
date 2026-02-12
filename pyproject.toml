@@ -125,9 +125,9 @@ visualization = [
 ]
 
 agents = [
-    "langchain>=1,<1.2.4",
+    "langchain==1.2.3",
     "langchain-chroma>=1,<2",
-    "langchain-core>=1,<2",
+    "langchain-core==1.2.3",
     "langchain-openai>=1,<2",
     "langchain-text-splitters>=1,<2",
     "langchain-huggingface>=1,<2",
