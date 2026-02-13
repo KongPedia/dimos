@@ -65,6 +65,7 @@ all_blueprints = {
     "xarm-perception": "dimos.manipulation.manipulation_blueprints:xarm_perception",
     "xarm6-planner-only": "dimos.manipulation.manipulation_blueprints:xarm6_planner_only",
     "xarm7-planner-coordinator": "dimos.manipulation.manipulation_blueprints:xarm7_planner_coordinator",
+    "xarm7-trajectory-sim": "dimos.simulation.sim_blueprints:xarm7_trajectory_sim",
 }
 
 
@@ -104,6 +105,7 @@ all_modules = {
     "replanning_a_star_planner": "dimos.navigation.replanning_a_star.module",
     "rerun_bridge": "dimos.visualization.rerun.bridge",
     "ros_nav": "dimos.navigation.rosnav",
+    "simulation": "dimos.simulation.manipulators.sim_module",
     "spatial_memory": "dimos.perception.spatial_perception",
     "speak_skill": "dimos.agents.skills.speak_skill",
     "temporal_memory": "dimos.perception.experimental.temporal_memory.temporal_memory",
