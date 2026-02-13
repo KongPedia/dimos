@@ -1,5 +1,5 @@
 <div align="center">
-   <img width="1000" alt="banner_bordered_trimmed" src="https://github.com/user-attachments/assets/15283d94-ad95-42c9-abd5-6565a222a837" /> </a>
+   <img width="1000" alt="banner_bordered_trimmed" src="https://github.com/user-attachments/assets/64f13b39-da06-4f58-add0-cfc44f04db4e" /> </a>
     <h4 align="center">Program Atoms</h4>
     <h4 align="center">The Agentive Operating System for Generalist Robotics</h4>
 
