@@ -30,6 +30,6 @@ uv run dimos run unitree-go2-agentic-mcp
 
 ## How It Works
 
-1. `llm_agent(mcp_port=9990)` in the blueprint starts a TCP server
+1. `MCPModule` in the blueprint starts a TCP server on port 9990
 2. Claude Code spawns the bridge (`--bridge`) which connects to `localhost:9990`
 3. Skills are exposed as MCP tools (e.g., `relative_move`, `navigate_with_text`)

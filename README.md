@@ -196,11 +196,11 @@ A blueprint example that connects the image stream from a robot to an LLM Agent 
 from dimos.core import autoconnect, LCMTransport
 from dimos.msgs.sensor_msgs import Image
 from dimos.robot.unitree.go2.connection import go2_connection
-from dimos.agents.agent import llm_agent
+from dimos.agents.agent import agent
 
 blueprint = autoconnect(
     go2_connection(),
-    llm_agent(),
+    agent(),
 ).transports({("color_image", Image): LCMTransport("/color_image", Image)})
 
 # Run the blueprint
@@ -234,7 +234,6 @@ For system deps, Nix setups, and testing, see `/docs/development/README.md`.
 
 DimOS comes with a number of monitoring tools:
 - Run `lcmspy` to see how fast messages are being published on streams.
-- Run `skillspy` to see how skills are being called, how long they are running, which are active, etc.
 - Run `agentspy` to see the agent's status over time.
 - If you suspect there is a bug within DimOS itself, you can enable extreme logging by prefixing the dimos command with `DIMOS_LOG_LEVEL=DEBUG RERUN_SAVE=1 `. Ex: `DIMOS_LOG_LEVEL=DEBUG RERUN_SAVE=1 dimos --replay run unitree-go2`
 

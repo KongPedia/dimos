@@ -6,17 +6,15 @@
         {
           "name": "start_exploration",
           "args": {
-            "args": [
-              10
-            ]
+            "timeout": 10
           },
-          "id": "call_AMNeD8zTkvyFHKG90DriDPuM",
+          "id": "call_o5O7xLaI4iayDhszXblOiWVS",
           "type": "tool_call"
         }
       ]
     },
     {
-      "content": "I have completed a brief exploration of the surroundings. Let me know if there's anything specific you need!",
+      "content": "I have completed the exploration for 10 seconds. If there's anything specific you would like to do next, please let me know!",
       "tool_calls": []
     }
   ]

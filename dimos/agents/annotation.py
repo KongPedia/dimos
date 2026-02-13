@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dimos.protocol.skill.skill import skill
-from dimos.protocol.skill.type import Output, Reducer, Stream
+from collections.abc import Callable
+from typing import Any, TypeVar
 
-__all__ = ["Output", "Reducer", "Stream", "skill"]
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def skill(func: F) -> F:
+    func.__rpc__ = True  # type: ignore[attr-defined]
+    func.__skill__ = True  # type: ignore[attr-defined]
+    return func
