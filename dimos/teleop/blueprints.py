@@ -15,6 +15,11 @@
 
 """Teleop blueprints for testing and deployment."""
 
+from dimos.control.blueprints import (
+    coordinator_teleop_dual,
+    coordinator_teleop_piper,
+    coordinator_teleop_xarm6,
+)
 from dimos.core.blueprints import autoconnect
 from dimos.core.transport import LCMTransport
 from dimos.msgs.geometry_msgs import PoseStamped
@@ -25,7 +30,7 @@ from dimos.teleop.quest.quest_types import QuestButtons
 # Quest Teleop Blueprints
 # -----------------------------------------------------------------------------
 
-# Arm teleop with toggle-based engage
+# Arm teleop with press-and-hold engage
 arm_teleop = autoconnect(
     arm_teleop_module(),
 ).transports(
@@ -48,4 +53,62 @@ arm_teleop_visualizing = autoconnect(
 )
 
 
-__all__ = ["arm_teleop", "arm_teleop_visualizing"]
+# -----------------------------------------------------------------------------
+# Teleop wired to Coordinator (TeleopIK)
+# -----------------------------------------------------------------------------
+
+# Single XArm6 teleop: right controller -> xarm6
+# Usage: dimos run arm-teleop-xarm6
+
+arm_teleop_xarm6 = autoconnect(
+    arm_teleop_module(task_names={"right": "teleop_xarm"}),
+    coordinator_teleop_xarm6,
+).transports(
+    {
+        ("right_controller_output", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+        ("buttons", QuestButtons): LCMTransport("/teleop/buttons", QuestButtons),
+    }
+)
+
+
+# Single Piper teleop: left controller -> piper arm
+# Usage: dimos run arm-teleop-piper
+arm_teleop_piper = autoconnect(
+    arm_teleop_module(task_names={"left": "teleop_piper"}),
+    coordinator_teleop_piper,
+).transports(
+    {
+        ("left_controller_output", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+        ("buttons", QuestButtons): LCMTransport("/teleop/buttons", QuestButtons),
+    }
+)
+
+
+# Dual arm teleop: right -> piper, left -> xarm6 (TeleopIK)
+arm_teleop_dual = autoconnect(
+    arm_teleop_module(task_names={"right": "teleop_piper", "left": "teleop_xarm"}),
+    coordinator_teleop_dual,
+).transports(
+    {
+        ("right_controller_output", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+        ("left_controller_output", PoseStamped): LCMTransport(
+            "/coordinator/cartesian_command", PoseStamped
+        ),
+        ("buttons", QuestButtons): LCMTransport("/teleop/buttons", QuestButtons),
+    }
+)
+
+
+__all__ = [
+    "arm_teleop",
+    "arm_teleop_dual",
+    "arm_teleop_piper",
+    "arm_teleop_visualizing",
+    "arm_teleop_xarm6",
+]
