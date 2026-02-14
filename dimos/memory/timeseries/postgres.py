@@ -17,8 +17,8 @@ from collections.abc import Iterator
 import pickle
 import re
 
-import psycopg2  # type: ignore[import-not-found]
-import psycopg2.extensions  # type: ignore[import-not-found]
+import psycopg2  # type: ignore[import-untyped]
+import psycopg2.extensions  # type: ignore[import-untyped]
 
 from dimos.core.resource import Resource
 from dimos.memory.timeseries.base import T, TimeSeriesStore
