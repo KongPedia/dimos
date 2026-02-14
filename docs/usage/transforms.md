@@ -465,5 +465,5 @@ For the mathematical foundations, the ROS documentation provides detailed backgr
 - [ROS REP 105 - Coordinate Frames for Mobile Platforms](https://www.ros.org/reps/rep-0105.html)
 
 See also:
-- [Modules](/docs/concepts/modules/index.md) for understanding the module system
-- [Configuration](/docs/concepts/configuration.md) for module configuration patterns
+- [Modules](/docs/usage/modules.md) for understanding the module system
+- [Configuration](/docs/usage/configuration.md) for module configuration patterns

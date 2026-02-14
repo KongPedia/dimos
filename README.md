@@ -241,8 +241,8 @@ DimOS comes with a number of monitoring tools:
 # Documentation
 
 Concepts:
-- [Modules](/docs/concepts/modules.md): The building blocks of DimOS, modules run in parallel and are singleton python classes.
-- [Streams](/docs/api/sensor_streams/index.md): How modules communicate, a Pub / Sub system.
+- [Modules](/docs/usage/modules.md): The building blocks of DimOS, modules run in parallel and are singleton python classes.
+- [Streams](/docs/usage/sensor_streams/index.md): How modules communicate, a Pub / Sub system.
 - [Blueprints](/dimos/core/README_BLUEPRINTS.md): a way to group modules together and define their connections to each other.
 - [RPC](/dimos/core/README_BLUEPRINTS.md#calling-the-methods-of-other-modules): how one module can call a method on another module (arguments get serialized to JSON-like binary data).
 - [Skills](/dimos/core/README_BLUEPRINTS.md#defining-skills): An RPC function, except it can be called by an AI agent (a tool for an AI).
