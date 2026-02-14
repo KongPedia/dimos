@@ -275,6 +275,11 @@ drone = [
     "pymavlink"
 ]
 
+dds = [
+    "dimos[dev]",
+    "cyclonedds>=0.10.5",
+]
+
 # Minimal dependencies for Docker modules that communicate with the DimOS host
 docker = [
     "dimos-lcm",
@@ -343,6 +348,8 @@ exclude = "^dimos/models/Detic(/|$)|^dimos/rxpy_backpressure(/|$)|.*/test_.|.*/c
 [[tool.mypy.overrides]]
 module = [
     "annotation_protocol",
+    "cyclonedds",
+    "cyclonedds.*",
     "dimos_lcm.*",
     "etils",
     "geometry_msgs.*",
