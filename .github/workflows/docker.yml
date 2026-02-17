@@ -7,8 +7,6 @@ on:
     paths-ignore:
       - '**.md'
   pull_request:
-    paths-ignore:
-      - '**.md'
 
 permissions:
   contents: read
@@ -269,3 +267,16 @@ jobs:
   #         CI: "true"
   #       run: |
   #         /entrypoint.sh bash -c "pytest -m module"
+
+  ci-complete:
+    needs: [run-tests, run-heavy-tests, run-lcm-tests, run-integration-tests, run-ros-tests, run-mypy]
+    runs-on: [self-hosted, Linux]
+    if: always()
+    steps:
+      - name: CI gate
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "❌ One or more CI jobs failed or were cancelled"
+          exit 1
+      - name: CI passed
+        run: echo "✅ All CI checks passed or were intentionally skipped"
