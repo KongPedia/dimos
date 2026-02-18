@@ -353,6 +353,7 @@ module = [
     "dimos_lcm.*",
     "etils",
     "geometry_msgs.*",
+    "lazy_loader",
     "mujoco",
     "mujoco_playground.*",
     "nav_msgs.*",
@@ -411,4 +412,5 @@ ignore = [
     "*/package-lock.json",
     "dimos/dashboard/dimos.rbl",
     "dimos/web/dimos_interface/themes.json",
+    "dimos/manipulation/manipulation_module.py",
 ]
