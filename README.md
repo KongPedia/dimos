@@ -146,7 +146,7 @@ humancli
 
 Modules are subsystems on a robot that operate autonomously and communicate with other subsystems using standardized messages. See below a simple robot connection module that sends streams of continuous `cmd_vel` to the robot and recieves `color_image` to a simple `Listener` module.
 
-```py
+```python
 import threading, time, numpy as np
 from dimos.core import In, Module, Out, rpc, autoconnect
 from dimos.msgs.geometry_msgs import Twist
@@ -192,7 +192,7 @@ Blueprints are how robots are constructed on Dimensional; instructions for how t
 Blueprints can be composed, remapped, and have transports overridden if `autoconnect()` fails due to conflicting variable names or `In[]` and `Out[]` message types.
 
 A blueprint example that connects the image stream from a robot to an LLM Agent for reasoning and action execution.
-```py
+```python
 from dimos.core import autoconnect, LCMTransport
 from dimos.msgs.sensor_msgs import Image
 from dimos.robot.unitree.go2.connection import go2_connection
