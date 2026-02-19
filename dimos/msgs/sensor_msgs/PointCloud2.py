@@ -609,7 +609,7 @@ class PointCloud2(Timestamped):
     def to_rerun(
         self,
         voxel_size: float = 0.05,
-        colormap: str | None = "turbo",
+        colormap: str | None = None,
         colors: list[int] | None = None,
         mode: str = "points",
         size: float | None = None,
@@ -636,6 +636,8 @@ class PointCloud2(Timestamped):
         if len(points) == 0:
             return rr.Points3D([]) if mode != "boxes" else rr.Boxes3D(centers=[])
 
+        if colors is None and colormap is None:
+            colormap = "turbo"  # Default colormap if no colors provided
         # Determine colors
         point_colors = None
         if colormap is not None:
