@@ -200,8 +200,6 @@ cuda = [
     "nvidia-nvimgcodec-cu12[all]; platform_machine == 'x86_64'",
     "onnxruntime-gpu>=1.17.1; platform_machine == 'x86_64'", # Only versions supporting both cuda11 and cuda12
     "ctransformers[cuda]==0.2.27",
-    "mmengine>=0.10.3",
-    "mmcv>=2.1.0",
     "xformers>=0.0.20; platform_machine == 'x86_64'",
 ]
 
@@ -308,7 +306,6 @@ base = [
 
 
 [tool.uv]
-no-build-isolation-package = ["mmcv"]
 constraint-dependencies = ["setuptools<82"]
 
 [tool.ruff]
