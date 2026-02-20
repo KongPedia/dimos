@@ -307,6 +307,10 @@ base = [
 ]
 
 
+[tool.uv]
+no-build-isolation-package = ["mmcv"]
+constraint-dependencies = ["setuptools<82"]
+
 [tool.ruff]
 line-length = 100
 exclude = [
