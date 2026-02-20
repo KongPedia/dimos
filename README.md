@@ -108,7 +108,7 @@ Dimensional is agent native -- "vibecode" your robots in natural language and bu
       🟥 <a href="dimos/robot/unitree/b1">Unitree B1</a><br>
     </td>
     <td align="center" width="20%">
-      🟥 <a href="docs/todo.md">Unitree G1</a><br>
+      🟨 <a href="docs/todo.md">Unitree G1</a><br>
     </td>
     <td align="center" width="20%">
       🟥 <a href="docs/todo.md">Xarm</a><br>
@@ -131,7 +131,7 @@ Dimensional is agent native -- "vibecode" your robots in natural language and bu
 
 # Installation
 
-## Step 1: System Install
+## System Install
 
 To set up your system dependencies, follow one of these guides:
 
@@ -139,11 +139,13 @@ To set up your system dependencies, follow one of these guides:
 - 🟩 [NixOS / General Linux](docs/installation/nix.md)
 - 🟧 [macOS](docs/installation/osx.md)
 
-## Step 2: Python Installs
+## Python Installs
 
 ### Quickstart
 
 ```bash
+uv venv --python "3.12"
+source .venv/bin/activate
 uv pip install dimos[base,unitree]
 
 # Replay a recorded Go2 session (no hardware needed)
@@ -156,7 +158,6 @@ dimos --replay run unitree-go2
 uv pip install dimos[base,unitree,sim]
 
 # Run Go2 in MuJoCo simulation
-export DISPLAY=:1 # Or DISPLAY=:0 if getting GLFW/OpenGL X11 errors
 dimos --simulation run unitree-go2
 
 # Run G1 humanoid in simulation
@@ -176,16 +177,13 @@ export GIT_LFS_SKIP_SMUDGE=1
 git clone -b dev https://github.com/dimensionalOS/dimos.git
 cd dimos
 
-uv venv --python 3.12
-source .venv/bin/activate
-
 uv sync --all-extras
 
-# Run full test suite
+# Run fast test suite
 uv run pytest dimos
 ```
 
-### Step 3 - Profit
+### Demos
 
 <img src="assets/readme/dimos_demo.gif" alt="DimOS Demo" width="100%">
 

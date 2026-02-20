@@ -49,15 +49,6 @@ export GIT_LFS_SKIP_SMUDGE=1
 git clone -b dev https://github.com/dimensionalOS/dimos.git
 cd dimos
 
-# create venv
-uv venv --python 3.12
-
-# if using direnv (recommended)
-direnv allow
-
-# if not using direnv
-# source .venv/bin/activate
-
 uv sync --all-extras
 
 # type check
