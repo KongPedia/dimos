@@ -56,7 +56,7 @@ uv pip install -e '.[base,dev,manipulation,misc,unitree,drone]'
 # setup pre-commit
 pre-commit install
 
-# test the install (takes about 3 minutes)
+# test the install (takes about 1 minute)
 uv run pytest dimos
 ```
 
