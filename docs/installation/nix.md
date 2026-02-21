@@ -44,6 +44,9 @@ cd dimos
 # enter the nix development shell (provides system deps)
 nix develop
 
+python3 -m venv .venv
+source .venv/bin/activate
+
 pip install -e ".[misc,sim,visualization,agents,web,perception,unitree,manipulation,cpu,dev]"
 
 # type check
