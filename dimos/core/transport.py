@@ -14,28 +14,52 @@
 
 from __future__ import annotations
 
-from typing import Any, TypeVar
-
-import dimos.core.colors as colors
-
-T = TypeVar("T")
-
+import threading
 from typing import (
     TYPE_CHECKING,
+    Any,
     TypeVar,
 )
 
+import dimos.core.colors as colors
 from dimos.core.stream import In, Out, Stream, Transport
 from dimos.msgs.protocol import DimosMsg
-from dimos.protocol.pubsub.jpeg_shm import JpegSharedMemory
-from dimos.protocol.pubsub.lcmpubsub import LCM, JpegLCM, PickleLCM, Topic as LCMTopic
-from dimos.protocol.pubsub.rospubsub import DimosROS, ROSTopic
-from dimos.protocol.pubsub.shmpubsub import BytesSharedMemory, PickleSharedMemory
+
+try:
+    import cyclonedds as _cyclonedds  # noqa: F401
+
+    DDS_AVAILABLE = True
+except ImportError:
+    DDS_AVAILABLE = False
+from dimos.protocol.pubsub.impl.jpeg_shm import JpegSharedMemory
+from dimos.protocol.pubsub.impl.lcmpubsub import LCM, JpegLCM, PickleLCM, Topic as LCMTopic
+from dimos.protocol.pubsub.impl.rospubsub import DimosROS, ROSTopic
+from dimos.protocol.pubsub.impl.shmpubsub import BytesSharedMemory, PickleSharedMemory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 T = TypeVar("T")  # type: ignore[misc]
+
+# TODO
+# Transports need to be rewritten and simplified,
+#
+# there is no need for them to get a reference to "a stream" on publish/subscribe calls
+# this is a legacy from dask transports.
+#
+# new transport should literally have 2 functions (next to start/stop)
+# "send(msg)" and "receive(callback)" and that's all
+#
+# we can also consider pubsubs conforming directly to Transport specs
+# and removing PubSubTransport glue entirely
+#
+# Why not ONLY pubsubs without Transport abstraction?
+#
+# General idea for transports (and why they exist at all)
+# is that they can be * anything * like
+#
+# a web camera rtsp stream for Image, audio stream from mic, etc
+# http binary streams, tcp connections etc
 
 
 class PubSubTransport(Transport[T]):
@@ -73,7 +97,7 @@ class pLCMTransport(PubSubTransport[T]):
     ) -> Callable[[], None]:
         if not self._started:
             self.start()
-        return self.lcm.subscribe(self.topic, lambda msg, topic: callback(msg))
+        return self.lcm.subscribe(LCMTopic(self.topic), lambda msg, topic: callback(msg))
 
     def start(self) -> None:
         self.lcm.start()
@@ -112,7 +136,7 @@ class LCMTransport(PubSubTransport[T]):
     def subscribe(self, callback: Callable[[T], None], selfstream: In[T] = None) -> None:  # type: ignore[assignment, override]
         if not self._started:
             self.start()
-        return self.lcm.subscribe(self.topic, lambda msg, topic: callback(msg))  # type: ignore[return-value]
+        return self.lcm.subscribe(self.topic, lambda msg, topic: callback(msg))  # type: ignore[return-value, arg-type]
 
 
 class JpegLcmTransport(LCMTransport):  # type: ignore[type-arg]
@@ -256,6 +280,43 @@ class ROSTransport(PubSubTransport[DimosMsg]):
         if self._ros is not None:
             self._ros.stop()
             self._ros = None
+
+
+if DDS_AVAILABLE:
+    from dimos.protocol.pubsub.impl.ddspubsub import DDS, Topic as DDSTopic
+
+    class DDSTransport(PubSubTransport[T]):
+        def __init__(self, topic: str, type: type, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            super().__init__(DDSTopic(topic, type))
+            self.dds = DDS(**kwargs)
+            self._started: bool = False
+            self._start_lock = threading.RLock()
+
+        def start(self) -> None:
+            with self._start_lock:
+                if not self._started:
+                    self.dds.start()
+                    self._started = True
+
+        def stop(self) -> None:
+            with self._start_lock:
+                if self._started:
+                    self.dds.stop()
+                    self._started = False
+
+        def broadcast(self, _, msg) -> None:  # type: ignore[no-untyped-def]
+            with self._start_lock:
+                if not self._started:
+                    self.start()
+                self.dds.publish(self.topic, msg)
+
+        def subscribe(
+            self, callback: Callable[[T], None], selfstream: Stream[T] | None = None
+        ) -> Callable[[], None]:
+            with self._start_lock:
+                if not self._started:
+                    self.start()
+                return self.dds.subscribe(self.topic, lambda msg, topic: callback(msg))
 
 
 class ZenohTransport(PubSubTransport[T]): ...

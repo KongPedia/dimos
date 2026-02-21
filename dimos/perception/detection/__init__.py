@@ -1,7 +1,10 @@
-from dimos.perception.detection.detectors import *
-from dimos.perception.detection.module2D import (
-    Detection2DModule,
-)
-from dimos.perception.detection.module3D import (
-    Detection3DModule,
+import lazy_loader as lazy
+
+__getattr__, __dir__, __all__ = lazy.attach(
+    __name__,
+    submod_attrs={
+        "detectors": ["Detector", "Yolo2DDetector"],
+        "module2D": ["Detection2DModule"],
+        "module3D": ["Detection3DModule"],
+    },
 )

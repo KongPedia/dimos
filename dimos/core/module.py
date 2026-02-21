@@ -11,10 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+import inspect
+import json
 import sys
 import threading
 from typing import (
@@ -26,24 +29,37 @@ from typing import (
     overload,
 )
 
+from typing_extensions import TypeVar as TypeVarExtension
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dimos.core.introspection.module import ModuleInfo
+    from dimos.core.rpc_client import RPCClient
+
+from typing import TypeVar
 
 from dask.distributed import Actor, get_worker
+from langchain_core.tools import tool
 from reactivex.disposable import CompositeDisposable
-from typing_extensions import TypeVar
 
 from dimos.core import colors
 from dimos.core.core import T, rpc
 from dimos.core.introspection.module import extract_module_info, render_module_io
 from dimos.core.resource import Resource
-from dimos.core.rpc_client import RpcCall
+from dimos.core.rpc_client import RpcCall  # noqa: TC001
 from dimos.core.stream import In, Out, RemoteIn, RemoteOut, Transport
 from dimos.protocol.rpc import LCMRPC, RPCSpec
 from dimos.protocol.service import Configurable  # type: ignore[attr-defined]
-from dimos.protocol.skill.skill import SkillContainer
 from dimos.protocol.tf import LCMTF, TFSpec
 from dimos.utils.generic import classproperty
+
+
+@dataclass(frozen=True)
+class SkillInfo:
+    class_name: str
+    func_name: str
+    args_schema: str
 
 
 def get_loop() -> tuple[asyncio.AbstractEventLoop, threading.Thread | None]:
@@ -82,10 +98,10 @@ class ModuleConfig:
     frame_id: str | None = None
 
 
-ModuleConfigT = TypeVar("ModuleConfigT", bound=ModuleConfig, default=ModuleConfig)
+ModuleConfigT = TypeVarExtension("ModuleConfigT", bound=ModuleConfig, default=ModuleConfig)
 
 
-class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
+class ModuleBase(Configurable[ModuleConfigT], Resource):
     _rpc: RPCSpec | None = None
     _tf: TFSpec | None = None
     _loop: asyncio.AbstractEventLoop | None = None
@@ -126,16 +142,23 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
     @rpc
     def stop(self) -> None:
         self._close_module()
-        super().stop()
 
     def _close_module(self) -> None:
         self._close_rpc()
-        if hasattr(self, "_loop") and self._loop_thread:
-            if self._loop_thread.is_alive():
-                self._loop.call_soon_threadsafe(self._loop.stop)  # type: ignore[union-attr]
-                self._loop_thread.join(timeout=2)
+
+        # Save into local variables to avoid race when stopping concurrently
+        # (from RPC and worker shutdown)
+        loop_thread = getattr(self, "_loop_thread", None)
+        loop = getattr(self, "_loop", None)
+
+        if loop_thread:
+            if loop_thread.is_alive():
+                if loop:
+                    loop.call_soon_threadsafe(loop.stop)
+                loop_thread.join(timeout=2)
             self._loop = None
             self._loop_thread = None
+
         if hasattr(self, "_tf") and self._tf is not None:
             self._tf.stop()
             self._tf = None
@@ -143,8 +166,7 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
             self._disposables.dispose()
 
     def _close_rpc(self) -> None:
-        # Using hasattr is needed because SkillCoordinator skips ModuleBase.__init__ and self.rpc is never set.
-        if hasattr(self, "rpc") and self.rpc:
+        if self.rpc:
             self.rpc.stop()  # type: ignore[attr-defined]
             self.rpc = None  # type: ignore[assignment]
 
@@ -264,7 +286,7 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
         """Descriptor that makes io() work on both class and instance."""
 
         def __get__(
-            self, obj: "ModuleBase | None", objtype: type["ModuleBase"]
+            self, obj: ModuleBase | None, objtype: type[ModuleBase]
         ) -> Callable[[bool], str]:
             if obj is None:
                 return objtype._io_class
@@ -273,7 +295,7 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
     io = _io_descriptor()
 
     @classmethod
-    def _module_info_class(cls) -> "ModuleInfo":
+    def _module_info_class(cls) -> ModuleInfo:
         """Class-level module_info() - returns ModuleInfo from annotations."""
 
         hints = get_type_hints(cls)
@@ -309,8 +331,8 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
         """Descriptor that makes module_info() work on both class and instance."""
 
         def __get__(
-            self, obj: "ModuleBase | None", objtype: type["ModuleBase"]
-        ) -> Callable[[], "ModuleInfo"]:
+            self, obj: ModuleBase | None, objtype: type[ModuleBase]
+        ) -> Callable[[], ModuleInfo]:
             if obj is None:
                 return objtype._module_info_class
             # For instances, extract from actual streams
@@ -326,9 +348,9 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
     @classproperty
     def blueprint(self):  # type: ignore[no-untyped-def]
         # Here to prevent circular imports.
-        from dimos.core.blueprints import create_module_blueprint
+        from dimos.core.blueprints import Blueprint
 
-        return partial(create_module_blueprint, self)  # type: ignore[arg-type]
+        return partial(Blueprint.create, self)  # type: ignore[arg-type]
 
     @rpc
     def get_rpc_method_names(self) -> list[str]:
@@ -338,6 +360,10 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
     def set_rpc_method(self, method: str, callable: RpcCall) -> None:
         callable.set_rpc(self.rpc)  # type: ignore[arg-type]
         self._bound_rpc_calls[method] = callable
+
+    @rpc
+    def set_module_ref(self, name: str, module_ref: RPCClient) -> None:
+        setattr(self, name, module_ref)
 
     @overload
     def get_rpc_calls(self, method: str) -> RpcCall: ...
@@ -354,8 +380,22 @@ class ModuleBase(Configurable[ModuleConfigT], SkillContainer, Resource):
         result = tuple(self._bound_rpc_calls[m] for m in methods)
         return result[0] if len(result) == 1 else result
 
+    @rpc
+    def get_skills(self) -> list[SkillInfo]:
+        skills: list[SkillInfo] = []
+        for name in dir(self):
+            attr = getattr(self, name)
+            if callable(attr) and hasattr(attr, "__skill__"):
+                schema = json.dumps(tool(attr).args_schema.model_json_schema())
+                skills.append(
+                    SkillInfo(
+                        class_name=self.__class__.__name__, func_name=name, args_schema=schema
+                    )
+                )
+        return skills
 
-class DaskModule(ModuleBase[ModuleConfigT]):
+
+class Module(ModuleBase[ModuleConfigT]):
     ref: Actor
     worker: int
 
@@ -438,6 +478,17 @@ class DaskModule(ModuleBase[ModuleConfigT]):
         stream._transport = transport
         return True
 
+    @rpc
+    def configure_stream(self, stream_name: str, topic: str) -> bool:
+        """Configure a stream's transport by topic. Called by DockerModule for stream wiring."""
+        from dimos.core.transport import pLCMTransport
+
+        stream = getattr(self, stream_name, None)
+        if not isinstance(stream, (Out, In)):
+            return False
+        stream._transport = pLCMTransport(topic)
+        return True
+
     # called from remote
     def connect_stream(self, input_name: str, remote_stream: RemoteOut[T]):  # type: ignore[no-untyped-def]
         input_stream = getattr(self, input_name, None)
@@ -454,5 +505,11 @@ class DaskModule(ModuleBase[ModuleConfigT]):
         getattr(self, output_name).transport.dask_register_subscriber(subscriber)
 
 
-# global setting
-Module = DaskModule
+ModuleT = TypeVar("ModuleT", bound="Module")
+
+
+def is_module_type(value: Any) -> bool:
+    try:
+        return inspect.isclass(value) and issubclass(value, Module)
+    except Exception:
+        return False

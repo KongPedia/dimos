@@ -69,7 +69,7 @@ class ObservableMixin(Generic[T]):
 
     # default return is backpressured because most
     # use cases will want this by default
-    def observable(self):  # type: ignore[no-untyped-def]
+    def observable(self) -> Observable[T]:
         return backpressure(self.pure_observable())
 
 
@@ -255,7 +255,7 @@ class In(Stream[T], ObservableMixin[T]):
 
 
 # representation of input outside of module
-# used for configuring connections, setting a transport
+# used for configuring streams, setting a transport
 class RemoteIn(RemoteStream[T]):
     def connect(self, other: RemoteOut[T]) -> None:
         return self.owner.connect_stream(self.name, other).result()  # type: ignore[no-any-return, union-attr]

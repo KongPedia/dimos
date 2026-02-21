@@ -24,12 +24,11 @@ from dimos.core import (
     Out,
     pLCMTransport,
     rpc,
-    start,
 )
 from dimos.core.testing import MockRobotClient, dimos
 from dimos.msgs.geometry_msgs import Vector3
 from dimos.msgs.sensor_msgs import PointCloud2
-from dimos.robot.unitree_webrtc.type.odometry import Odometry
+from dimos.robot.unitree.type.odometry import Odometry
 
 assert dimos
 
@@ -87,7 +86,7 @@ def test_classmethods() -> None:
     # Check that we have the expected RPC methods
     assert "navigate_to" in class_rpcs, "navigate_to should be in rpcs"
     assert "start" in class_rpcs, "start should be in rpcs"
-    assert len(class_rpcs) == 8
+    assert len(class_rpcs) == 9
 
     # Check that the values are callable
     assert callable(class_rpcs["navigate_to"]), "navigate_to should be callable"
@@ -138,8 +137,3 @@ def test_basic_deployment(dimos) -> None:
     assert nav.lidar_msg_count >= 8
 
     dimos.shutdown()
-
-
-if __name__ == "__main__":
-    client = start(1)  # single process for CI memory
-    test_deployment(client)

@@ -17,15 +17,12 @@ from functools import cached_property
 
 from PIL import Image as PILImage
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as functional
 from transformers import CLIPModel as HFCLIPModel, CLIPProcessor  # type: ignore[import-untyped]
 
 from dimos.models.base import HuggingFaceModel
 from dimos.models.embedding.base import Embedding, EmbeddingModel, HuggingFaceEmbeddingModelConfig
 from dimos.msgs.sensor_msgs import Image
-
-
-class CLIPEmbedding(Embedding): ...
 
 
 @dataclass
@@ -34,7 +31,7 @@ class CLIPModelConfig(HuggingFaceEmbeddingModelConfig):
     dtype: torch.dtype = torch.float32
 
 
-class CLIPModel(EmbeddingModel[CLIPEmbedding], HuggingFaceModel):
+class CLIPModel(EmbeddingModel, HuggingFaceModel):
     """CLIP embedding model for vision-language re-identification."""
 
     default_config = CLIPModelConfig
@@ -50,7 +47,7 @@ class CLIPModel(EmbeddingModel[CLIPEmbedding], HuggingFaceModel):
     def _processor(self) -> CLIPProcessor:
         return CLIPProcessor.from_pretrained(self.config.model_name)
 
-    def embed(self, *images: Image) -> CLIPEmbedding | list[CLIPEmbedding]:
+    def embed(self, *images: Image) -> Embedding | list[Embedding]:
         """Embed one or more images.
 
         Returns embeddings as torch.Tensor on device for efficient GPU comparisons.
@@ -64,17 +61,17 @@ class CLIPModel(EmbeddingModel[CLIPEmbedding], HuggingFaceModel):
             image_features = self._model.get_image_features(**inputs)
 
             if self.config.normalize:
-                image_features = F.normalize(image_features, dim=-1)
+                image_features = functional.normalize(image_features, dim=-1)
 
         # Create embeddings (keep as torch.Tensor on device)
-        embeddings = []
+        embeddings: list[Embedding] = []
         for i, feat in enumerate(image_features):
             timestamp = images[i].ts
-            embeddings.append(CLIPEmbedding(vector=feat, timestamp=timestamp))
+            embeddings.append(Embedding(vector=feat, timestamp=timestamp))
 
         return embeddings[0] if len(images) == 1 else embeddings
 
-    def embed_text(self, *texts: str) -> CLIPEmbedding | list[CLIPEmbedding]:
+    def embed_text(self, *texts: str) -> Embedding | list[Embedding]:
         """Embed one or more text strings.
 
         Returns embeddings as torch.Tensor on device for efficient GPU comparisons.
@@ -86,12 +83,12 @@ class CLIPModel(EmbeddingModel[CLIPEmbedding], HuggingFaceModel):
             text_features = self._model.get_text_features(**inputs)
 
             if self.config.normalize:
-                text_features = F.normalize(text_features, dim=-1)
+                text_features = functional.normalize(text_features, dim=-1)
 
         # Create embeddings (keep as torch.Tensor on device)
-        embeddings = []
+        embeddings: list[Embedding] = []
         for feat in text_features:
-            embeddings.append(CLIPEmbedding(vector=feat))
+            embeddings.append(Embedding(vector=feat))
 
         return embeddings[0] if len(texts) == 1 else embeddings
 

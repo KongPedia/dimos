@@ -15,16 +15,13 @@
 from enum import Enum
 import inspect
 import sys
-from typing import Any, Optional, get_args, get_origin
+from typing import Any, get_args, get_origin
 
+from dotenv import load_dotenv
 import typer
 
-from dimos.core.blueprints import autoconnect
-from dimos.core.global_config import GlobalConfig
-from dimos.protocol import pubsub
-from dimos.robot.all_blueprints import all_blueprints, get_blueprint_by_name, get_module_by_name
-from dimos.robot.cli.topic import topic_echo, topic_send
-from dimos.utils.logging_config import setup_exception_handler
+from dimos.core.global_config import GlobalConfig, global_config
+from dimos.robot.all_blueprints import all_blueprints
 
 RobotType = Enum("RobotType", {key.replace("-", "_").upper(): key for key in all_blueprints.keys()})  # type: ignore[misc]
 
@@ -32,6 +29,8 @@ main = typer.Typer(
     help="Dimensional CLI",
     no_args_is_help=True,
 )
+
+load_dotenv()
 
 
 def create_dynamic_callback():  # type: ignore[no-untyped-def]
@@ -48,7 +47,7 @@ def create_dynamic_callback():  # type: ignore[no-untyped-def]
 
         # Handle Optional types
         # Check for Optional/Union with None
-        if get_origin(field_type) is type(Optional[str]):  # noqa: UP045
+        if get_origin(field_type) is type(str | None):
             inner_types = get_args(field_type)
             if len(inner_types) == 2 and type(None) in inner_types:
                 # It's Optional[T], get the actual type T
@@ -72,7 +71,7 @@ def create_dynamic_callback():  # type: ignore[no-untyped-def]
                     f"--{cli_option_name}/--no-{cli_option_name}",
                     help=f"Override {field_name} in GlobalConfig",
                 ),
-                annotation=Optional[bool],  # noqa: UP045
+                annotation=bool | None,
             )
         else:
             # For non-boolean fields, use regular option
@@ -84,7 +83,7 @@ def create_dynamic_callback():  # type: ignore[no-untyped-def]
                     f"--{cli_option_name}",
                     help=f"Override {field_name} in GlobalConfig",
                 ),
-                annotation=Optional[actual_type],  # noqa: UP045
+                annotation=actual_type | None,
             )
         params.append(param)
 
@@ -109,9 +108,15 @@ def run(
     ),
 ) -> None:
     """Start a robot blueprint"""
+    from dimos.core.blueprints import autoconnect
+    from dimos.protocol import pubsub
+    from dimos.robot.get_all_blueprints import get_blueprint_by_name, get_module_by_name
+    from dimos.utils.logging_config import setup_exception_handler
+
     setup_exception_handler()
 
     cli_config_overrides: dict[str, Any] = ctx.obj
+    global_config.update(**cli_config_overrides)
     pubsub.lcm.autoconf()  # type: ignore[attr-defined]
     blueprint = get_blueprint_by_name(robot_type.value)
 
@@ -126,16 +131,19 @@ def run(
 @main.command()
 def show_config(ctx: typer.Context) -> None:
     """Show current config settings and their values."""
-    cli_config_overrides: dict[str, Any] = ctx.obj
-    config = GlobalConfig().model_copy(update=cli_config_overrides)
 
-    for field_name, value in config.model_dump().items():
+    cli_config_overrides: dict[str, Any] = ctx.obj
+    global_config.update(**cli_config_overrides)
+
+    for field_name, value in global_config.model_dump().items():
         typer.echo(f"{field_name}: {value}")
 
 
 @main.command()
 def list() -> None:
     """List all available blueprints."""
+    from dimos.robot.all_blueprints import all_blueprints
+
     blueprints = [name for name in all_blueprints.keys() if not name.startswith("demo-")]
     for blueprint_name in sorted(blueprints):
         typer.echo(blueprint_name)
@@ -148,15 +156,6 @@ def lcmspy(ctx: typer.Context) -> None:
 
     sys.argv = ["lcmspy", *ctx.args]
     lcmspy_main()
-
-
-@main.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
-def skillspy(ctx: typer.Context) -> None:
-    """Skills spy tool for monitoring skills."""
-    from dimos.utils.cli.skillspy.skillspy import main as skillspy_main
-
-    sys.argv = ["skillspy", *ctx.args]
-    skillspy_main()
 
 
 @main.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -189,6 +188,8 @@ def echo(
         help="Optional message type (e.g., PoseStamped). If omitted, infer from '/topic#pkg.Msg'.",
     ),
 ) -> None:
+    from dimos.robot.cli.topic import topic_echo
+
     topic_echo(topic, type_name)
 
 
@@ -197,7 +198,24 @@ def send(
     topic: str = typer.Argument(..., help="Topic name to send to (e.g., /goal_request)"),
     message_expr: str = typer.Argument(..., help="Python expression for the message"),
 ) -> None:
+    from dimos.robot.cli.topic import topic_send
+
     topic_send(topic, message_expr)
+
+
+@main.command(name="rerun-bridge")
+def rerun_bridge_cmd(
+    viewer_mode: str = typer.Option(
+        "native", help="Viewer mode: native (desktop), web (browser), none (headless)"
+    ),
+    memory_limit: str = typer.Option(
+        "25%", help="Memory limit for Rerun viewer (e.g., '4GB', '16GB', '25%')"
+    ),
+) -> None:
+    """Launch the Rerun visualization bridge."""
+    from dimos.visualization.rerun.bridge import run_bridge
+
+    run_bridge(viewer_mode=viewer_mode, memory_limit=memory_limit)
 
 
 if __name__ == "__main__":

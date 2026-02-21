@@ -7,24 +7,24 @@ __all__ = [
 
 # Optional: CLIP support
 try:
-    from dimos.models.embedding.clip import CLIPEmbedding, CLIPModel
+    from dimos.models.embedding.clip import CLIPModel
 
-    __all__.extend(["CLIPEmbedding", "CLIPModel"])
+    __all__.append("CLIPModel")
 except ImportError:
     pass
 
 # Optional: MobileCLIP support
 try:
-    from dimos.models.embedding.mobileclip import MobileCLIPEmbedding, MobileCLIPModel
+    from dimos.models.embedding.mobileclip import MobileCLIPModel
 
-    __all__.extend(["MobileCLIPEmbedding", "MobileCLIPModel"])
+    __all__.append("MobileCLIPModel")
 except ImportError:
     pass
 
 # Optional: TorchReID support
 try:
-    from dimos.models.embedding.treid import TorchReIDEmbedding, TorchReIDModel
+    from dimos.models.embedding.treid import TorchReIDModel
 
-    __all__.extend(["TorchReIDEmbedding", "TorchReIDModel"])
+    __all__.append("TorchReIDModel")
 except ImportError:
     pass

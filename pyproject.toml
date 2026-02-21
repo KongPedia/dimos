@@ -23,7 +23,7 @@ name = "dimos"
 authors = [
     {name = "Dimensional Team", email = "build@dimensionalOS.com"},
 ]
-version = "0.0.9"
+version = "0.0.10.post1"
 description = "Powering agentive generalist robotics"
 requires-python = ">=3.10"
 readme = "README.md"
@@ -32,52 +32,52 @@ dependencies = [
     # Transport Protocols
     "dimos-lcm",
     "PyTurboJPEG==1.8.2",
-
     # Core
     "numpy>=1.26.4",
     "scipy>=1.15.1",
+    "pin>=3.3.0",  # Pinocchio IK library
     "reactivex",
     "asyncio==3.4.3",
     "sortedcontainers==2.4.0",
     "pydantic",
     "python-dotenv",
+    "annotation-protocol>=1.4.0",
+    "lazy_loader",
 
     # Multiprocess
     "dask[complete]==2025.5.1",
     "plum-dispatch==2.5.7",
-
     # Logging
     "structlog>=25.5.0,<26",
     "colorlog==6.9.0",
-
     # Core Msgs
     "opencv-python",
-    "open3d",
-
+    "open3d-unofficial-arm; platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "open3d>=0.18.0; platform_system != 'Linux' or platform_machine != 'aarch64'",
     # CLI
     "pydantic-settings>=2.11.0,<3",
     "textual==3.7.1",
     "terminaltexteffects==0.12.2",
     "typer>=0.19.2,<1",
     "plotext==5.3.2",
-
     # Used for calculating the occupancy map.
     "numba>=0.60.0",    # First version supporting Python 3.12
     "llvmlite>=0.42.0", # Required by numba 0.60+
-
     # TODO: rerun shouldn't be required but rn its in core (there is NO WAY to use dimos without rerun rn)
     # remove this once rerun is optional in core
     "rerun-sdk>=0.20.0",
+    "toolz>=1.1.0",
 ]
 
 
 [project.scripts]
 lcmspy = "dimos.utils.cli.lcmspy.run_lcmspy:main"
 foxglove-bridge = "dimos.utils.cli.foxglove_bridge.run_foxglove_bridge:main"
-skillspy = "dimos.utils.cli.skillspy.skillspy:main"
 agentspy = "dimos.utils.cli.agentspy.agentspy:main"
 humancli = "dimos.utils.cli.human.humanclianim:main"
 dimos = "dimos.robot.cli.dimos:main"
+rerun-bridge = "dimos.visualization.rerun.bridge:app"
+doclinks = "dimos.utils.docs.doclinks:main"
 
 [project.optional-dependencies]
 misc = [
@@ -126,9 +126,9 @@ visualization = [
 ]
 
 agents = [
-    "langchain>=1,<2",
+    "langchain==1.2.3",
     "langchain-chroma>=1,<2",
-    "langchain-core>=1,<2",
+    "langchain-core==1.2.3",
     "langchain-openai>=1,<2",
     "langchain-text-splitters>=1,<2",
     "langchain-huggingface>=1,<2",
@@ -171,25 +171,22 @@ unitree = [
 ]
 
 manipulation = [
-    # Contact Graspnet Dependencies
-    "h5py>=3.7.0",
-    "pyrender>=0.1.45",
-    "trimesh>=3.22.0",
-    "python-fcl>=0.7.0.4",
-    "pyquaternion>=0.9.9",
-    "matplotlib>=3.7.1",
-    "rtree",
-    "pandas>=1.5.2",
-    "tqdm>=4.65.0",
-    "pyyaml>=6.0",
-    "contact-graspnet-pytorch",
+    # Planning (Drake)
+    "drake==1.45.0; sys_platform == 'darwin' and platform_machine != 'aarch64'",
+    "drake>=1.40.0; sys_platform != 'darwin' and platform_machine != 'aarch64'",
 
-    # piper arm
+    # Hardware SDKs
     "piper-sdk",
+    "xarm-python-sdk>=1.17.0",
 
     # Visualization (Optional)
     "kaleido>=0.2.1",
     "plotly>=5.9.0",
+    "xacro",
+
+    # Other
+    "matplotlib>=3.7.1",
+    "pyyaml>=6.0",
 ]
 
 
@@ -200,13 +197,11 @@ cpu = [
 ]
 
 cuda = [
-    "cupy-cuda12x==13.6.0",
-    "nvidia-nvimgcodec-cu12[all]",
-    "onnxruntime-gpu>=1.17.1", # Only versions supporting both cuda11 and cuda12
+    "cupy-cuda12x==13.6.0; platform_machine == 'x86_64'",
+    "nvidia-nvimgcodec-cu12[all]; platform_machine == 'x86_64'",
+    "onnxruntime-gpu>=1.17.1; platform_machine == 'x86_64'", # Only versions supporting both cuda11 and cuda12
     "ctransformers[cuda]==0.2.27",
-    "mmengine>=0.10.3",
-    "mmcv>=2.1.0",
-    "xformers>=0.0.20",
+    "xformers>=0.0.20; platform_machine == 'x86_64'",
 ]
 
 dev = [
@@ -225,6 +220,10 @@ dev = [
 
     # docs
     "md-babel-py==1.1.1",
+
+    # LSP
+    "python-lsp-server[all]==1.14.0",
+    "python-lsp-ruff==2.3.0",
 
     # Types
     "lxml-stubs>=0.5.1,<1",
@@ -245,6 +244,14 @@ dev = [
     "types-tabulate>=0.9.0.20241207,<1",
     "types-tensorflow>=2.18.0.20251008,<3",
     "types-tqdm>=4.67.0.20250809,<5",
+    "types-psycopg2>=2.9.21.20251012",
+
+    # Tools
+    "py-spy",
+]
+
+psql = [
+    "psycopg2-binary>=2.9.11"
 ]
 
 sim = [
@@ -266,6 +273,32 @@ sim = [
 
 drone = [
     "pymavlink"
+]
+
+dds = [
+    "dimos[dev]",
+    "cyclonedds>=0.10.5",
+]
+
+# Minimal dependencies for Docker modules that communicate with the DimOS host
+docker = [
+    "dimos-lcm",
+    "numpy>=1.26.4",
+    "scipy>=1.15.1",
+    "reactivex",
+    "dask[distributed]==2025.5.1",
+    "plum-dispatch==2.5.7",
+    "structlog>=25.5.0,<26",
+    "pydantic",
+    "pydantic-settings>=2.11.0,<3",
+    "typer>=0.19.2,<1",
+    "opencv-python-headless",
+    "lcm",
+    "sortedcontainers",
+    "PyTurboJPEG",
+    "rerun-sdk",
+    "open3d-unofficial-arm; platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "open3d>=0.18.0; platform_system != 'Linux' or platform_machine != 'aarch64'",
 ]
 
 base = [
@@ -295,7 +328,7 @@ exclude = [
 [tool.ruff.lint]
 extend-select = ["E", "W", "F", "B", "UP", "N", "I", "C90", "A", "RUF", "TCH"]
 # TODO: All of these should be fixed, but it's easier commit autofixes first
-ignore = ["A001", "A002", "B008", "B017", "B019", "B023", "B024", "B026", "B904", "C901", "E402", "E501", "E721", "E722", "E741", "F401", "F403", "F811", "F821", "F821", "F821", "N801", "N802", "N803", "N806", "N812", "N813", "N813", "N816", "N817", "N999", "RUF002", "RUF003", "RUF006", "RUF009", "RUF012", "RUF034", "RUF043", "RUF059", "UP007"]
+ignore = ["A001", "A002", "B008", "B017", "B019", "B024", "B026", "B904", "C901", "E402", "E501", "E721", "E722", "E741", "F811", "F821", "F821", "F821", "N801", "N802", "N803", "N806", "N817", "N999", "RUF003", "RUF009", "RUF012", "RUF034", "RUF043", "RUF059", "UP007"]
 
 [tool.ruff.lint.per-file-ignores]
 "dimos/models/Detic/*" = ["ALL"]
@@ -314,32 +347,45 @@ exclude = "^dimos/models/Detic(/|$)|^dimos/rxpy_backpressure(/|$)|.*/test_.|.*/c
 
 [[tool.mypy.overrides]]
 module = [
-    "rclpy.*",
-    "std_msgs.*",
+    "annotation_protocol",
+    "cyclonedds",
+    "cyclonedds.*",
+    "dimos_lcm.*",
+    "etils",
     "geometry_msgs.*",
-    "sensor_msgs.*",
-    "nav_msgs.*",
-    "tf2_msgs.*",
+    "lazy_loader",
     "mujoco",
     "mujoco_playground.*",
-    "etils",
-    "xarm.*",
-    "dimos_lcm.*",
-    "piper_sdk.*",
-    "plum.*",
-    "pycuda.*",
-    "pycuda",
-    "plotext",
-    "torchreid",
+    "nav_msgs.*",
     "open_clip",
-    "pyzed.*",
+    "pinocchio",
+    "piper_sdk.*",
+    "plotext",
+    "pydrake",
+    "pydrake.*",
+    "plum.*",
+    "pycuda",
+    "pycuda.*",
     "pyzed",
+    "pyzed.*",
+    "rclpy.*",
+    "sam2.*",
+    "sensor_msgs.*",
+    "std_msgs.*",
+    "tf2_msgs.*",
+    "torchreid",
+    "ultralytics.*",
     "unitree_webrtc_connect.*",
+    "xarm.*",
 ]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["dimos.rxpy_backpressure", "dimos.rxpy_backpressure.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = ["pydrake", "pydrake.*"]
 follow_imports = "skip"
 
 [tool.pytest.ini_options]
@@ -351,7 +397,7 @@ markers = [
     "lcm: tests that run actual LCM bus (can't execute in CI)",
     "module: tests that need to run directly as modules",
     "gpu: tests that require GPU",
-    "tofix: temporarily disabled test",
+    "cuda: tests which require CUDA (specifically CUDA not just GPU acceleration)",
     "e2e: end to end tests",
     "integration: slower integration tests",
     "neverending: they don't finish",
@@ -361,7 +407,7 @@ env = [
   "GOOGLE_MAPS_API_KEY=AIzafake_google_key",
   "PYTHONWARNINGS=ignore:cupyx.jit.rawkernel is experimental:FutureWarning",
 ]
-addopts = "-v -p no:warnings -ra --color=yes -m 'not (vis or exclude or tool or lcm or ros or heavy or gpu or module or tofix or e2e or integration or neverending or mujoco)'"
+addopts = "-v -s -p no:warnings -ra --color=yes -m 'not (vis or exclude or tool or lcm or ros or heavy or gpu or module or e2e or integration or neverending or mujoco)'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -372,13 +418,5 @@ ignore = [
     "*/package-lock.json",
     "dimos/dashboard/dimos.rbl",
     "dimos/web/dimos_interface/themes.json",
+    "dimos/manipulation/manipulation_module.py",
 ]
-
-[tool.uv]
-# Build dependencies for packages that don't declare them properly
-extra-build-dependencies = { contact-graspnet-pytorch = ["numpy"] }
-
-default-groups = []
-
-[tool.uv.sources]
-contact-graspnet-pytorch = { git = "https://github.com/dimensionalOS/contact_graspnet_pytorch.git" }

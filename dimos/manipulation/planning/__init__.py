@@ -15,11 +15,70 @@
 """
 Manipulation Planning Module
 
-Trajectory generation and motion planning for robotic manipulators.
-"""
+Motion planning stack for robotic manipulators using Protocol-based architecture.
 
-from dimos.manipulation.planning.trajectory_generator.joint_trajectory_generator import (
-    JointTrajectoryGenerator,
+## Architecture
+
+- WorldSpec: Core backend owning physics/collision (DrakeWorld, future: MuJoCoWorld)
+- KinematicsSpec: IK solvers
+  - JacobianIK: Backend-agnostic iterative/differential IK
+  - DrakeOptimizationIK: Drake-specific nonlinear optimization IK
+- PlannerSpec: Backend-agnostic joint-space path planning
+  - RRTConnectPlanner: Bi-directional RRT-Connect
+  - RRTStarPlanner: RRT* (asymptotically optimal)
+
+## Factory Functions
+
+Use factory functions to create components:
+
+```python
+from dimos.manipulation.planning.factory import (
+    create_world,
+    create_kinematics,
+    create_planner,
 )
 
-__all__ = ["JointTrajectoryGenerator"]
+world = create_world(backend="drake", enable_viz=True)
+kinematics = create_kinematics(name="jacobian")  # or "drake_optimization"
+planner = create_planner(name="rrt_connect")  # backend-agnostic
+```
+
+## Monitors
+
+Use WorldMonitor for reactive state synchronization:
+
+```python
+from dimos.manipulation.planning.monitor import WorldMonitor
+
+monitor = WorldMonitor(enable_viz=True)
+robot_id = monitor.add_robot(config)
+monitor.finalize()
+monitor.start_state_monitor(robot_id)
+```
+"""
+
+import lazy_loader as lazy
+
+__getattr__, __dir__, __all__ = lazy.attach(
+    __name__,
+    submod_attrs={
+        "factory": ["create_kinematics", "create_planner", "create_planning_stack", "create_world"],
+        "spec": [
+            "CollisionObjectMessage",
+            "IKResult",
+            "IKStatus",
+            "JointPath",
+            "KinematicsSpec",
+            "Obstacle",
+            "ObstacleType",
+            "PlannerSpec",
+            "PlanningResult",
+            "PlanningStatus",
+            "RobotModelConfig",
+            "RobotName",
+            "WorldRobotID",
+            "WorldSpec",
+        ],
+        "trajectory_generator.joint_trajectory_generator": ["JointTrajectoryGenerator"],
+    },
+)

@@ -14,11 +14,12 @@
 
 import pytest
 
-from dimos.core.blueprints import ModuleBlueprintSet
-from dimos.robot.all_blueprints import all_blueprints, get_blueprint_by_name
+from dimos.core.blueprints import Blueprint
+from dimos.robot.all_blueprints import all_blueprints
+from dimos.robot.get_all_blueprints import get_blueprint_by_name
 
 # Optional dependencies that are allowed to be missing
-OPTIONAL_DEPENDENCIES = {"pyrealsense2", "geometry_msgs", "turbojpeg"}
+OPTIONAL_DEPENDENCIES = {"pyrealsense2", "pyzed", "geometry_msgs", "turbojpeg"}
 OPTIONAL_ERROR_SUBSTRINGS = {
     "Unable to locate turbojpeg library automatically",
 }
@@ -27,7 +28,7 @@ OPTIONAL_ERROR_SUBSTRINGS = {
 @pytest.mark.integration
 @pytest.mark.parametrize("blueprint_name", all_blueprints.keys())
 def test_all_blueprints_are_valid(blueprint_name: str) -> None:
-    """Test that all blueprints in all_blueprints are valid ModuleBlueprintSet instances."""
+    """Test that all blueprints in all_blueprints are valid Blueprint instances."""
     try:
         blueprint = get_blueprint_by_name(blueprint_name)
     except ModuleNotFoundError as e:
@@ -39,6 +40,6 @@ def test_all_blueprints_are_valid(blueprint_name: str) -> None:
         if any(substring in message for substring in OPTIONAL_ERROR_SUBSTRINGS):
             pytest.skip(f"Skipping due to missing optional dependency: {message}")
         raise
-    assert isinstance(blueprint, ModuleBlueprintSet), (
-        f"Blueprint '{blueprint_name}' is not a ModuleBlueprintSet, got {type(blueprint)}"
+    assert isinstance(blueprint, Blueprint), (
+        f"Blueprint '{blueprint_name}' is not a Blueprint, got {type(blueprint)}"
     )

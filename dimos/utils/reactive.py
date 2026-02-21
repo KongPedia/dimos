@@ -19,6 +19,7 @@ from typing import Any, Generic, TypeVar
 
 import reactivex as rx
 from reactivex import operators as ops
+from reactivex.abc import DisposableBase
 from reactivex.disposable import Disposable
 from reactivex.observable import Observable
 from reactivex.scheduler import ThreadPoolScheduler
@@ -64,7 +65,7 @@ def backpressure(
     return rx.defer(lambda *_: per_sub())  # type: ignore[no-untyped-call]
 
 
-class LatestReader(Generic[T]):
+class LatestReader(DisposableBase, Generic[T]):
     """A callable object that returns the latest value from an observable."""
 
     def __init__(self, initial_value: T, subscription, connection=None) -> None:  # type: ignore[no-untyped-def]
@@ -193,12 +194,60 @@ def callback_to_observable(
     start: Callable[[CB[T]], Any],
     stop: Callable[[CB[T]], Any],
 ) -> Observable[T]:
+    """Convert a register/unregister callback API to an Observable.
+
+    Use this for APIs where you register a callback with one function and
+    unregister with another, passing the same callback reference:
+
+        sensor.register(callback)    # start
+        sensor.unregister(callback)  # stop - needs the same callback
+
+    Example:
+        obs = callback_to_observable(
+            start=sensor.register,
+            stop=sensor.unregister,
+        )
+        sub = obs.subscribe(lambda x: print(x))
+        # ...
+        sub.dispose()  # calls sensor.unregister(callback)
+
+    For APIs where subscribe() returns an unsubscribe callable, use
+    unsub_to_observable() instead.
+    """
+
     def _subscribe(observer, _scheduler=None):  # type: ignore[no-untyped-def]
         def _on_msg(value: T) -> None:
             observer.on_next(value)
 
         start(_on_msg)
         return Disposable(lambda: stop(_on_msg))
+
+    return rx.create(_subscribe)
+
+
+def to_observable(
+    subscribe: Callable[[Callable[[T], Any]], Callable[[], None]],
+) -> Observable[T]:
+    """Convert a subscribe-returns-unsub API to an Observable.
+
+    Use this for APIs where subscribe() returns an unsubscribe callable:
+
+        unsub = pubsub.subscribe(callback)  # returns unsubscribe function
+        unsub()  # to unsubscribe
+
+    Example:
+        obs = to_observable(pubsub.subscribe)
+        sub = obs.subscribe(lambda x: print(x))
+        # ...
+        sub.dispose()  # calls the unsub function returned by pubsub.subscribe
+
+    For APIs with separate register/unregister functions, use
+    callback_to_observable() instead.
+    """
+
+    def _subscribe(observer, _scheduler=None):  # type: ignore[no-untyped-def]
+        unsub = subscribe(observer.on_next)
+        return Disposable(unsub)
 
     return rx.create(_subscribe)
 
@@ -211,7 +260,9 @@ def spy(name: str):  # type: ignore[no-untyped-def]
     return ops.map(spyfun)
 
 
-def quality_barrier(quality_func: Callable[[T], float], target_frequency: float):  # type: ignore[no-untyped-def]
+def quality_barrier(
+    quality_func: Callable[[T], float], target_frequency: float
+) -> Callable[[Observable[T]], Observable[T]]:
     """
     RxPY pipe operator that selects the highest quality item within each time window.
 

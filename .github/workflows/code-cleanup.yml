@@ -1,6 +1,6 @@
 name: code-cleanup
 on:
-  push:
+  pull_request:
     paths-ignore:
       - '**.md'
 

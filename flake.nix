@@ -28,10 +28,11 @@
           { vals.pkg=pkgs.gh;                 flags={}; }
           { vals.pkg=pkgs.stdenv.cc.cc.lib;   flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.stdenv.cc;          flags.ldLibraryGroup=true; }
+          { vals.pkg=pkgs.gfortran.cc.lib;    flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.cctools;            flags={}; onlyIf=pkgs.stdenv.isDarwin; } # for pip install opencv-python
           { vals.pkg=pkgs.pcre2;              flags={ ldLibraryGroup=pkgs.stdenv.isDarwin; packageConfGroup=pkgs.stdenv.isDarwin; }; }
           { vals.pkg=pkgs.libsysprof-capture; flags.packageConfGroup=true; onlyIf=pkgs.stdenv.isDarwin; }
-          { vals.pkg=pkgs.xcbuild;            flags={}; }
+          { vals.pkg=pkgs.xcbuild;            flags={}; onlyIf=pkgs.stdenv.isDarwin; }
           { vals.pkg=pkgs.git-lfs;            flags={}; }
           { vals.pkg=pkgs.gnugrep;            flags={}; }
           { vals.pkg=pkgs.gnused;             flags={}; }
@@ -128,6 +129,7 @@
           { vals.pkg=pkgs.libjpeg;       flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.libjpeg_turbo; flags.ldLibraryGroup=true; }
           { vals.pkg=pkgs.libpng;        flags={}; }
+          { vals.pkg=pkgs.libidn2;       flags.ldLibraryGroup=true; }
 
           ### Docs generators
           { vals.pkg=pkgs.pikchr;        flags={}; }
@@ -165,6 +167,7 @@
                     }
             );
           }
+          { vals.pkg=pkgs.cyclonedds; flags.ldLibraryGroup=true; flags.packageConfGroup=true; }
         ];
 
         # ------------------------------------------------------------
@@ -211,6 +214,8 @@
           export GI_TYPELIB_PATH="${giTypelibPackagesString}:$GI_TYPELIB_PATH"
           export PKG_CONFIG_PATH=${lib.escapeShellArg packageConfPackagesString}
           export PYTHONPATH="$PYTHONPATH:"${lib.escapeShellArg manualPythonPackages}
+          export CYCLONEDDS_HOME="${pkgs.cyclonedds}"
+          export CMAKE_PREFIX_PATH="${pkgs.cyclonedds}:$CMAKE_PREFIX_PATH"
           # CC, CFLAGS, and LDFLAGS are bascially all for `pip install pyaudio`
           export CFLAGS="$(pkg-config --cflags portaudio-2.0) $CFLAGS"
           export LDFLAGS="-L$(pkg-config --variable=libdir portaudio-2.0) $LDFLAGS"
@@ -224,7 +229,7 @@
           fi
 
           [ -f "$PROJECT_ROOT/motd" ] && cat "$PROJECT_ROOT/motd"
-          [ -f "$PROJECT_ROOT/.pre-commit-config.yaml" ] && pre-commit install --install-hooks
+          [ -f "$PROJECT_ROOT/.pre-commit-config.yaml" ] && [ ! -f "$PROJECT_ROOT/.git/hooks/pre-commit" ] && pre-commit install --install-hooks
         '';
         devShells = {
           # basic shell (blends with your current environment)

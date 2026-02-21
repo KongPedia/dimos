@@ -15,8 +15,11 @@
 import time
 from typing import Any
 
+from reactivex.disposable import Disposable
+
+from dimos.agents.annotation import skill
 from dimos.core.core import rpc
-from dimos.core.skill_module import SkillModule
+from dimos.core.module import Module
 from dimos.core.stream import In
 from dimos.models.qwen.video_query import BBox
 from dimos.models.vl.qwen import QwenVlModel
@@ -25,14 +28,13 @@ from dimos.msgs.geometry_msgs.Vector3 import make_vector3
 from dimos.msgs.sensor_msgs import Image
 from dimos.navigation.base import NavigationState
 from dimos.navigation.visual.query import get_object_bbox_from_image
-from dimos.protocol.skill.skill import skill
 from dimos.types.robot_location import RobotLocation
 from dimos.utils.logging_config import setup_logger
 
 logger = setup_logger()
 
 
-class NavigationSkillContainer(SkillModule):
+class NavigationSkillContainer(Module):
     _latest_image: Image | None = None
     _latest_odom: PoseStamped | None = None
     _skill_started: bool = False
@@ -49,9 +51,6 @@ class NavigationSkillContainer(SkillModule):
         "ObjectTracking.track",
         "ObjectTracking.stop_track",
         "ObjectTracking.is_tracking",
-        "WavefrontFrontierExplorer.stop_exploration",
-        "WavefrontFrontierExplorer.explore",
-        "WavefrontFrontierExplorer.is_exploration_active",
     ]
 
     color_image: In[Image]
@@ -64,8 +63,9 @@ class NavigationSkillContainer(SkillModule):
 
     @rpc
     def start(self) -> None:
-        self._disposables.add(self.color_image.subscribe(self._on_color_image))  # type: ignore[arg-type]
-        self._disposables.add(self.odom.subscribe(self._on_odom))  # type: ignore[arg-type]
+        super().start()
+        self._disposables.add(Disposable(self.color_image.subscribe(self._on_color_image)))
+        self._disposables.add(Disposable(self.odom.subscribe(self._on_odom)))
         self._skill_started = True
 
     @rpc
@@ -78,7 +78,7 @@ class NavigationSkillContainer(SkillModule):
     def _on_odom(self, odom: PoseStamped) -> None:
         self._latest_odom = odom
 
-    @skill()
+    @skill
     def tag_location(self, location_name: str) -> str:
         """Tag this location in the spatial memory with a name.
 
@@ -93,12 +93,12 @@ class NavigationSkillContainer(SkillModule):
 
         if not self._skill_started:
             raise ValueError(f"{self} has not been started.")
-        tf = self.tf.get("map", "base_link", time_tolerance=2.0)
-        if not tf:
-            return "Could not get the robot's current transform."
 
-        position = tf.translation
-        rotation = tf.rotation.to_euler()
+        if not self._latest_odom:
+            return "No odometry data received yet, cannot tag location."
+
+        position = self._latest_odom.position
+        rotation = self._latest_odom.orientation
 
         location = RobotLocation(
             name=location_name,
@@ -113,7 +113,7 @@ class NavigationSkillContainer(SkillModule):
         logger.info(f"Tagged {location}")
         return f"Tagged '{location_name}': ({position.x},{position.y})."
 
-    @skill()
+    @skill
     def navigate_with_text(self, query: str) -> str:
         """Navigate to a location by querying the existing semantic map using natural language.
 
@@ -158,48 +158,31 @@ class NavigationSkillContainer(SkillModule):
         if not robot_location:
             return None
 
-        print("Found tagged location:", robot_location)
+        logger.info("Found tagged location", location=robot_location)
         goal_pose = PoseStamped(
             position=make_vector3(*robot_location.position),
             orientation=Quaternion.from_euler(Vector3(*robot_location.rotation)),
             frame_id="map",
         )
 
-        result = self._navigate_to(goal_pose)
-        if not result:
-            return "Error: Faild to reach the tagged location."
+        return self._navigate_to(goal_pose, f"Found a tagged location called '{query}'.")
 
-        return (
-            f"Successfuly arrived at location tagged '{robot_location.name}' from query '{query}'."
-        )
-
-    def _navigate_to(self, pose: PoseStamped) -> bool:
+    def _navigate_to(self, pose: PoseStamped, message: str) -> str:
         try:
-            set_goal_rpc, get_state_rpc, is_goal_reached_rpc = self.get_rpc_calls(
-                "NavigationInterface.set_goal",
-                "NavigationInterface.get_state",
-                "NavigationInterface.is_goal_reached",
-            )
+            set_goal_rpc = self.get_rpc_calls("NavigationInterface.set_goal")
         except Exception:
             logger.error("Navigation module not connected properly")
-            return False
+            return "Error: Navigation module is not connected, cannot set goal."
 
         logger.info(
             f"Navigating to pose: ({pose.position.x:.2f}, {pose.position.y:.2f}, {pose.position.z:.2f})"
         )
         set_goal_rpc(pose)
-        time.sleep(1.0)
 
-        while get_state_rpc() == NavigationState.FOLLOWING_PATH:
-            time.sleep(0.25)
-
-        time.sleep(1.0)
-        if not is_goal_reached_rpc():
-            logger.info("Navigation was cancelled or failed")
-            return False
-        else:
-            logger.info("Navigation goal reached")
-            return True
+        return (
+            f"{message}. Started navigating to that position. "
+            f"To cancel movement call the 'stop_navigation' tool."
+        )
 
     def _navigate_to_object(self, query: str) -> str | None:
         try:
@@ -286,24 +269,15 @@ class NavigationSkillContainer(SkillModule):
 
         goal_pose = self._get_goal_pose_from_result(best_match)
 
-        print("Goal pose for semantic nav:", goal_pose)
+        logger.info("Goal pose for semantic nav", pose=goal_pose)
         if not goal_pose:
             return f"Found a result for '{query}' but it didn't have a valid position."
 
-        result = self._navigate_to(goal_pose)
+        message = f"Found a location in the semantic map matching '{query}'."
+        return self._navigate_to(goal_pose, message)
 
-        if not result:
-            return f"Failed to navigate for '{query}'"
-
-        return f"Successfuly arrived at '{query}'"
-
-    @skill()
-    def follow_human(self, person: str) -> str:
-        """Follow a specific person"""
-        return "Not implemented yet."
-
-    @skill()
-    def stop_movement(self) -> str:
+    @skill
+    def stop_navigation(self) -> str:
         """Immediatly stop moving."""
 
         if not self._skill_started:
@@ -320,57 +294,7 @@ class NavigationSkillContainer(SkillModule):
             logger.warning("Navigation module not connected, cannot cancel goal")
             return
 
-        try:
-            stop_exploration_rpc = self.get_rpc_calls("WavefrontFrontierExplorer.stop_exploration")
-        except Exception:
-            logger.warning("FrontierExplorer module not connected, cannot stop exploration")
-            return
-
         cancel_goal_rpc()
-        return stop_exploration_rpc()  # type: ignore[no-any-return]
-
-    @skill()
-    def start_exploration(self, timeout: float = 240.0) -> str:
-        """A skill that performs autonomous frontier exploration.
-
-        This skill continuously finds and navigates to unknown frontiers in the environment
-        until no more frontiers are found or the exploration is stopped.
-
-        Don't call any other skills except stop_movement skill when needed.
-
-        Args:
-            timeout (float, optional): Maximum time (in seconds) allowed for exploration
-        """
-
-        if not self._skill_started:
-            raise ValueError(f"{self} has not been started.")
-
-        try:
-            return self._start_exploration(timeout)
-        finally:
-            self._cancel_goal_and_stop()
-
-    def _start_exploration(self, timeout: float) -> str:
-        try:
-            explore_rpc, is_exploration_active_rpc = self.get_rpc_calls(
-                "WavefrontFrontierExplorer.explore",
-                "WavefrontFrontierExplorer.is_exploration_active",
-            )
-        except Exception:
-            return "Error: The WavefrontFrontierExplorer module is not connected."
-
-        logger.info("Starting autonomous frontier exploration")
-
-        start_time = time.time()
-
-        has_started = explore_rpc()
-        if not has_started:
-            return "Error: Could not start exploration."
-
-        while time.time() - start_time < timeout and is_exploration_active_rpc():
-            time.sleep(0.5)
-
-        return "Exploration completed successfuly"
 
     def _get_goal_pose_from_result(self, result: dict[str, Any]) -> PoseStamped | None:
         similarity = 1.0 - (result.get("distance") or 1)
@@ -383,9 +307,7 @@ class NavigationSkillContainer(SkillModule):
         metadata = result.get("metadata")
         if not metadata:
             return None
-        print(metadata)
         first = metadata[0]
-        print(first)
         pos_x = first.get("pos_x", 0)
         pos_y = first.get("pos_y", 0)
         theta = first.get("rot_z", 0)

@@ -12,25 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ControlTask protocol and types for the ControlOrchestrator.
+"""ControlTask protocol and types for the ControlCoordinator.
 
 This module defines:
-- Data types used by tasks and the orchestrator (ResourceClaim, JointStateSnapshot, etc.)
+- Data types used by tasks and the coordinator (ResourceClaim, JointStateSnapshot, etc.)
 - ControlTask protocol that all tasks must implement
 
-Tasks are "passive" - they don't own threads. The orchestrator calls
+Tasks are "passive" - they don't own threads. The coordinator calls
 compute() at each tick, passing current state and time.
 
 CRITICAL: Tasks must NEVER call time.time() directly.
-Use the t_now passed in OrchestratorState.
+Use the t_now passed in CoordinatorState.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from dimos.control.components import JointName
 from dimos.hardware.manipulators.spec import ControlMode
+
+if TYPE_CHECKING:
+    from dimos.msgs.geometry_msgs import Pose, PoseStamped
+    from dimos.teleop.quest.quest_types import Buttons
 
 # =============================================================================
 # Data Types
@@ -41,7 +46,7 @@ from dimos.hardware.manipulators.spec import ControlMode
 class ResourceClaim:
     """Declares which joints a task wants to control.
 
-    Used by the orchestrator to determine resource ownership and
+    Used by the coordinator to determine resource ownership and
     resolve conflicts between competing tasks.
 
     Attributes:
@@ -52,7 +57,7 @@ class ResourceClaim:
         mode: Control mode (POSITION, VELOCITY, TORQUE)
     """
 
-    joints: frozenset[str]
+    joints: frozenset[JointName]
     priority: int = 0
     mode: ControlMode = ControlMode.POSITION
 
@@ -75,26 +80,26 @@ class JointStateSnapshot:
         timestamp: Unix timestamp when state was read
     """
 
-    joint_positions: dict[str, float] = field(default_factory=dict)
-    joint_velocities: dict[str, float] = field(default_factory=dict)
-    joint_efforts: dict[str, float] = field(default_factory=dict)
+    joint_positions: dict[JointName, float] = field(default_factory=dict)
+    joint_velocities: dict[JointName, float] = field(default_factory=dict)
+    joint_efforts: dict[JointName, float] = field(default_factory=dict)
     timestamp: float = 0.0
 
-    def get_position(self, joint_name: str) -> float | None:
+    def get_position(self, joint_name: JointName) -> float | None:
         """Get position for a specific joint."""
         return self.joint_positions.get(joint_name)
 
-    def get_velocity(self, joint_name: str) -> float | None:
+    def get_velocity(self, joint_name: JointName) -> float | None:
         """Get velocity for a specific joint."""
         return self.joint_velocities.get(joint_name)
 
-    def get_effort(self, joint_name: str) -> float | None:
+    def get_effort(self, joint_name: JointName) -> float | None:
         """Get effort for a specific joint."""
         return self.joint_efforts.get(joint_name)
 
 
 @dataclass
-class OrchestratorState:
+class CoordinatorState:
     """Complete state snapshot for tasks to read.
 
     Passed to each task's compute() method every tick. Contains
@@ -109,7 +114,7 @@ class OrchestratorState:
     """
 
     joints: JointStateSnapshot
-    t_now: float  # Orchestrator time (perf_counter) - USE THIS, NOT time.time()!
+    t_now: float  # Coordinator time (perf_counter) - USE THIS, NOT time.time()!
     dt: float  # Time since last tick
 
 
@@ -118,7 +123,7 @@ class JointCommandOutput:
     """Joint-centric command output from a task.
 
     Commands are addressed by joint name, NOT by hardware ID.
-    The orchestrator routes commands to the appropriate hardware.
+    The coordinator routes commands to the appropriate hardware.
 
     This design enables:
     - WBC spanning multiple hardware interfaces
@@ -133,7 +138,7 @@ class JointCommandOutput:
         mode: Control mode - must match which field is populated
     """
 
-    joint_names: list[str]
+    joint_names: list[JointName]
     positions: list[float] | None = None
     velocities: list[float] | None = None
     efforts: list[float] | None = None
@@ -170,14 +175,14 @@ class JointCommandOutput:
 
 @runtime_checkable
 class ControlTask(Protocol):
-    """Protocol for passive tasks that run within the orchestrator.
+    """Protocol for passive tasks that run within the coordinator.
 
-    Tasks are "passive" - they don't own threads. The orchestrator
+    Tasks are "passive" - they don't own threads. The coordinator
     calls compute() at each tick, passing current state and time.
 
     Lifecycle:
-    1. Task is added to orchestrator via add_task()
-    2. Orchestrator calls claim() to understand resource needs
+    1. Task is added to coordinator via add_task()
+    2. Coordinator calls claim() to understand resource needs
     3. Each tick: is_active() → compute() → output merged via arbitration
     4. Task removed via remove_task() or transitions to inactive
 
@@ -199,7 +204,7 @@ class ControlTask(Protocol):
         ...     def is_active(self) -> bool:
         ...         return self._executing
         ...
-        ...     def compute(self, state: OrchestratorState) -> JointCommandOutput | None:
+        ...     def compute(self, state: CoordinatorState) -> JointCommandOutput | None:
         ...         # Use state.t_now, NOT time.time()!
         ...         t_elapsed = state.t_now - self._start_time
         ...         positions = self._trajectory.sample(t_elapsed)
@@ -217,14 +222,14 @@ class ControlTask(Protocol):
         """Unique identifier for this task instance.
 
         Used for logging, debugging, and task management.
-        Must be unique across all tasks in the orchestrator.
+        Must be unique across all tasks in the coordinator.
         """
         ...
 
     def claim(self) -> ResourceClaim:
         """Declare resource requirements.
 
-        Called by orchestrator to determine:
+        Called by coordinator to determine:
         - Which joints this task wants to control
         - Priority for conflict resolution
         - Control mode (position/velocity/effort)
@@ -233,7 +238,7 @@ class ControlTask(Protocol):
             ResourceClaim with joints (frozenset) and priority (int)
 
         Note:
-            The claim can change dynamically - orchestrator calls this
+            The claim can change dynamically - coordinator calls this
             every tick for active tasks.
         """
         ...
@@ -251,16 +256,16 @@ class ControlTask(Protocol):
         """
         ...
 
-    def compute(self, state: OrchestratorState) -> JointCommandOutput | None:
+    def compute(self, state: CoordinatorState) -> JointCommandOutput | None:
         """Compute output command given current state.
 
-        Called by orchestrator for active tasks each tick.
+        Called by coordinator for active tasks each tick.
 
         CRITICAL: Use state.t_now for timing, NEVER time.time()!
         This ensures deterministic behavior and enables simulation.
 
         Args:
-            state: OrchestratorState containing:
+            state: CoordinatorState containing:
                    - joints: JointStateSnapshot with all joint states
                    - t_now: Current tick time (use this for all timing!)
                    - dt: Time since last tick
@@ -271,7 +276,7 @@ class ControlTask(Protocol):
         """
         ...
 
-    def on_preempted(self, by_task: str, joints: frozenset[str]) -> None:
+    def on_preempted(self, by_task: str, joints: frozenset[JointName]) -> None:
         """Called ONCE per tick with ALL preempted joints aggregated.
 
         Called when a higher-priority task takes control of some of this
@@ -286,14 +291,56 @@ class ControlTask(Protocol):
         """
         ...
 
+    def on_buttons(self, msg: Buttons) -> bool:
+        """Handle button state from teleop controllers."""
+        ...
+
+    def on_cartesian_command(self, pose: Pose | PoseStamped, t_now: float) -> bool:
+        """Handle incoming cartesian command (target or delta pose)."""
+        ...
+
+    def set_target_by_name(self, positions: dict[str, float], t_now: float) -> bool:
+        """Handle servo position commands by joint name."""
+        ...
+
+    def set_velocities_by_name(self, velocities: dict[str, float], t_now: float) -> bool:
+        """Handle velocity commands by joint name."""
+        ...
+
+
+class BaseControlTask(ControlTask):
+    """Base class with no-op defaults for optional listener methods.
+
+    Inherit from this to avoid implementing empty methods
+    in tasks that don't need them. Only override what your task uses.
+    """
+
+    def on_buttons(self, msg: Buttons) -> bool:
+        """No-op default."""
+        return False
+
+    def on_cartesian_command(self, pose: Pose | PoseStamped, t_now: float) -> bool:
+        """No-op default."""
+        return False
+
+    def set_target_by_name(self, positions: dict[str, float], t_now: float) -> bool:
+        """No-op default."""
+        return False
+
+    def set_velocities_by_name(self, velocities: dict[str, float], t_now: float) -> bool:
+        """No-op default."""
+        return False
+
 
 __all__ = [
+    # Protocol + Base
+    "BaseControlTask",
     # Types
     "ControlMode",
-    # Protocol
     "ControlTask",
+    "CoordinatorState",
     "JointCommandOutput",
+    "JointName",
     "JointStateSnapshot",
-    "OrchestratorState",
     "ResourceClaim",
 ]

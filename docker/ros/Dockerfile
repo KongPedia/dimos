@@ -14,8 +14,7 @@ ENV LANG=en_US.UTF-8
 ENV ROS_DISTRO=humble
 
 # Install basic requirements
-RUN apt-get update
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y \
     curl \
     gnupg2 \
     lsb-release \
@@ -24,7 +23,7 @@ RUN apt-get install -y \
     portaudio19-dev \
     git \
     mesa-utils \
-    libgl1-mesa-glx \
+    libgl1 \
     libgl1-mesa-dri \
     software-properties-common \
     libxcb1-dev \
@@ -42,9 +41,6 @@ RUN apt-get install -y \
     qt5-qmake \
     qtbase5-dev-tools \
     supervisor
-
-# Install specific numpy version first
-RUN pip install 'numpy<2.0.0'
 
 # Add ROS2 apt repository
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
@@ -87,5 +83,3 @@ RUN rosdep update
 
 # Source ROS2 and workspace in bashrc
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
-
-# Trigger docker workflow rerun 1

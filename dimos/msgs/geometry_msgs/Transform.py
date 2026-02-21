@@ -15,26 +15,17 @@
 from __future__ import annotations
 
 import time
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
+
+if TYPE_CHECKING:
+    import rerun as rr
+
+    from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 
 from dimos_lcm.geometry_msgs import (
     Transform as LCMTransform,
     TransformStamped as LCMTransformStamped,
 )
-
-try:
-    from geometry_msgs.msg import (  # type: ignore[attr-defined]
-        Quaternion as ROSQuaternion,
-        Transform as ROSTransform,
-        TransformStamped as ROSTransformStamped,
-        Vector3 as ROSVector3,
-    )
-except ImportError:
-    ROSTransformStamped = None  # type: ignore[assignment, misc]
-    ROSTransform = None  # type: ignore[assignment, misc]
-    ROSVector3 = None  # type: ignore[assignment, misc]
-    ROSQuaternion = None  # type: ignore[assignment, misc]
-import rerun as rr
 
 from dimos.msgs.geometry_msgs.Quaternion import Quaternion
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
@@ -166,70 +157,6 @@ class Transform(Timestamped):
             ts=self.ts,
         )
 
-    @classmethod
-    def from_ros_transform_stamped(cls, ros_msg: ROSTransformStamped) -> Transform:
-        """Create a Transform from a ROS geometry_msgs/TransformStamped message.
-
-        Args:
-            ros_msg: ROS TransformStamped message
-
-        Returns:
-            Transform instance
-        """
-
-        # Convert timestamp
-        ts = ros_msg.header.stamp.sec + (ros_msg.header.stamp.nanosec / 1_000_000_000)
-
-        # Convert translation
-        translation = Vector3(
-            ros_msg.transform.translation.x,
-            ros_msg.transform.translation.y,
-            ros_msg.transform.translation.z,
-        )
-
-        # Convert rotation
-        rotation = Quaternion(
-            ros_msg.transform.rotation.x,
-            ros_msg.transform.rotation.y,
-            ros_msg.transform.rotation.z,
-            ros_msg.transform.rotation.w,
-        )
-
-        return cls(
-            translation=translation,
-            rotation=rotation,
-            frame_id=ros_msg.header.frame_id,
-            child_frame_id=ros_msg.child_frame_id,
-            ts=ts,
-        )
-
-    def to_ros_transform_stamped(self) -> ROSTransformStamped:
-        """Convert to a ROS geometry_msgs/TransformStamped message.
-
-        Returns:
-            ROS TransformStamped message
-        """
-
-        ros_msg = ROSTransformStamped()  # type: ignore[no-untyped-call]
-
-        # Set header
-        ros_msg.header.frame_id = self.frame_id
-        ros_msg.header.stamp.sec = int(self.ts)
-        ros_msg.header.stamp.nanosec = int((self.ts - int(self.ts)) * 1_000_000_000)
-
-        # Set child frame
-        ros_msg.child_frame_id = self.child_frame_id
-
-        # Set transform
-        ros_msg.transform.translation = ROSVector3(  # type: ignore[no-untyped-call]
-            x=self.translation.x, y=self.translation.y, z=self.translation.z
-        )
-        ros_msg.transform.rotation = ROSQuaternion(  # type: ignore[no-untyped-call]
-            x=self.rotation.x, y=self.rotation.y, z=self.rotation.z, w=self.rotation.w
-        )
-
-        return ros_msg
-
     def __neg__(self) -> Transform:
         """Unary minus operator returns the inverse transform."""
         return self.inverse()
@@ -266,7 +193,7 @@ class Transform(Timestamped):
         else:
             raise TypeError(f"Expected Pose or PoseStamped, got {type(pose).__name__}")
 
-    def to_pose(self, **kwargs) -> PoseStamped:  # type: ignore[name-defined, no-untyped-def]
+    def to_pose(self, **kwargs: object) -> PoseStamped:
         """Create a Transform from a Pose or PoseStamped.
 
         Args:
@@ -276,10 +203,10 @@ class Transform(Timestamped):
             A Transform with the same translation and rotation as the pose
         """
         # Import locally to avoid circular imports
-        from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+        from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped as _PoseStamped
 
         # Handle both Pose and PoseStamped
-        return PoseStamped(
+        result: PoseStamped = _PoseStamped(
             **{
                 "position": self.translation,
                 "orientation": self.rotation,
@@ -287,6 +214,7 @@ class Transform(Timestamped):
             },
             **kwargs,
         )
+        return result
 
     def to_matrix(self) -> np.ndarray:  # type: ignore[name-defined]
         """Convert Transform to a 4x4 transformation matrix.
@@ -361,17 +289,17 @@ class Transform(Timestamped):
             ts=ts,
         )
 
-    def to_rerun(self):  # type: ignore[no-untyped-def]
+    def to_rerun(self) -> rr.Transform3D:
         """Convert to rerun Transform3D format with frame IDs.
 
         Returns:
             rr.Transform3D archetype for logging to rerun with parent/child frames
         """
+        import rerun as rr
+
         return rr.Transform3D(
             translation=[self.translation.x, self.translation.y, self.translation.z],
-            rotation=rr.Quaternion(
-                xyzw=[self.rotation.x, self.rotation.y, self.rotation.z, self.rotation.w]
-            ),
-            parent_frame=self.frame_id,  # type: ignore[call-arg]
-            child_frame=self.child_frame_id,  # type: ignore[call-arg]
+            rotation=self.rotation.to_rerun(),
+            parent_frame="tf#/" + self.frame_id,
+            child_frame="tf#/" + self.child_frame_id,
         )

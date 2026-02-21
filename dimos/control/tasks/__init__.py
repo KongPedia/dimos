@@ -12,14 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Task implementations for the ControlOrchestrator."""
+"""Task implementations for the ControlCoordinator."""
 
+from dimos.control.tasks.cartesian_ik_task import (
+    CartesianIKTask,
+    CartesianIKTaskConfig,
+)
+from dimos.control.tasks.servo_task import (
+    JointServoTask,
+    JointServoTaskConfig,
+)
+from dimos.control.tasks.teleop_task import (
+    TeleopIKTask,
+    TeleopIKTaskConfig,
+)
 from dimos.control.tasks.trajectory_task import (
     JointTrajectoryTask,
     JointTrajectoryTaskConfig,
 )
+from dimos.control.tasks.velocity_task import (
+    JointVelocityTask,
+    JointVelocityTaskConfig,
+)
 
 __all__ = [
+    "CartesianIKTask",
+    "CartesianIKTaskConfig",
+    "JointServoTask",
+    "JointServoTaskConfig",
     "JointTrajectoryTask",
     "JointTrajectoryTaskConfig",
+    "JointVelocityTask",
+    "JointVelocityTaskConfig",
+    "TeleopIKTask",
+    "TeleopIKTaskConfig",
 ]

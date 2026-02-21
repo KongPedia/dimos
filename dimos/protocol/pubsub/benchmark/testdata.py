@@ -14,15 +14,27 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from dimos.msgs.sensor_msgs.Image import Image, ImageFormat
 from dimos.protocol.pubsub.benchmark.type import Case
-from dimos.protocol.pubsub.lcmpubsub import LCM, LCMPubSubBase, Topic as LCMTopic
-from dimos.protocol.pubsub.memory import Memory
-from dimos.protocol.pubsub.shmpubsub import BytesSharedMemory, LCMSharedMemory, PickleSharedMemory
+
+try:
+    import cyclonedds as _cyclonedds  # noqa: F401
+
+    DDS_AVAILABLE = True
+except ImportError:
+    DDS_AVAILABLE = False
+from dimos.protocol.pubsub.impl.lcmpubsub import LCM, LCMPubSubBase, Topic as LCMTopic
+from dimos.protocol.pubsub.impl.memory import Memory
+from dimos.protocol.pubsub.impl.shmpubsub import (
+    BytesSharedMemory,
+    LCMSharedMemory,
+    PickleSharedMemory,
+)
 
 
 def make_data_bytes(size: int) -> bytes:
@@ -169,9 +181,70 @@ testcases.append(
     )
 )
 
+if DDS_AVAILABLE:
+    from cyclonedds.idl import IdlStruct
+    from cyclonedds.idl.types import sequence, uint8
+    from cyclonedds.qos import Policy, Qos
+
+    from dimos.protocol.pubsub.impl.ddspubsub import (
+        DDS,
+        Topic as DDSTopic,
+    )
+
+    @dataclass
+    class DDSBenchmarkData(IdlStruct):  # type: ignore[misc]
+        """DDS message type for benchmarking with variable-size byte payload."""
+
+        data: sequence[uint8]  # type: ignore[type-arg]
+
+    @contextmanager
+    def dds_high_throughput_pubsub_channel() -> Generator[DDS, None, None]:
+        """DDS with high-throughput QoS preset."""
+        HIGH_THROUGHPUT_QOS = Qos(
+            Policy.Reliability.BestEffort,
+            Policy.History.KeepLast(depth=1),
+            Policy.Durability.Volatile,
+        )
+        dds_pubsub = DDS(qos=HIGH_THROUGHPUT_QOS)
+        dds_pubsub.start()
+        yield dds_pubsub
+        dds_pubsub.stop()
+
+    @contextmanager
+    def dds_reliable_pubsub_channel() -> Generator[DDS, None, None]:
+        """DDS with reliable QoS preset."""
+        RELIABLE_QOS = Qos(
+            Policy.Reliability.Reliable(max_blocking_time=0),
+            Policy.History.KeepLast(depth=5000),
+            Policy.Durability.Volatile,
+        )
+        dds_pubsub = DDS(qos=RELIABLE_QOS)
+        dds_pubsub.start()
+        yield dds_pubsub
+        dds_pubsub.stop()
+
+    def dds_msggen(size: int) -> tuple[DDSTopic, DDSBenchmarkData]:
+        """Generate DDS message for benchmark."""
+        topic = DDSTopic(name="benchmark/dds", data_type=DDSBenchmarkData)
+        return (topic, DDSBenchmarkData(data=list(make_data_bytes(size))))  # type: ignore[arg-type]
+
+    testcases.append(
+        Case(
+            pubsub_context=dds_high_throughput_pubsub_channel,
+            msg_gen=dds_msggen,
+        )
+    )
+
+    testcases.append(
+        Case(
+            pubsub_context=dds_reliable_pubsub_channel,
+            msg_gen=dds_msggen,
+        )
+    )
+
 
 try:
-    from dimos.protocol.pubsub.redispubsub import Redis
+    from dimos.protocol.pubsub.impl.redispubsub import Redis
 
     @contextmanager
     def redis_pubsub_channel() -> Generator[Redis, None, None]:
@@ -199,15 +272,29 @@ except (ConnectionError, ImportError):
     print("Redis not available")
 
 
-from dimos.protocol.pubsub.rospubsub import ROS_AVAILABLE, RawROS, RawROSTopic
+from dimos.protocol.pubsub.impl.rospubsub import (
+    ROS_AVAILABLE,
+    DimosROS,
+    RawROS,
+    RawROSTopic,
+    ROSTopic,
+)
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 if ROS_AVAILABLE:
-    from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
-    from sensor_msgs.msg import Image as ROSImage
+    from rclpy.qos import (  # type: ignore[no-untyped-call]
+        QoSDurabilityPolicy,
+        QoSHistoryPolicy,
+        QoSProfile,
+        QoSReliabilityPolicy,
+    )
+    from sensor_msgs.msg import Image as ROSImage  # type: ignore[attr-defined,no-untyped-call]
 
     @contextmanager
     def ros_best_effort_pubsub_channel() -> Generator[RawROS, None, None]:
-        qos = QoSProfile(
+        qos = QoSProfile(  # type: ignore[no-untyped-call]
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -220,7 +307,7 @@ if ROS_AVAILABLE:
 
     @contextmanager
     def ros_reliable_pubsub_channel() -> Generator[RawROS, None, None]:
-        qos = QoSProfile(
+        qos = QoSProfile(  # type: ignore[no-untyped-call]
             reliability=QoSReliabilityPolicy.RELIABLE,
             history=QoSHistoryPolicy.KEEP_LAST,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -235,21 +322,21 @@ if ROS_AVAILABLE:
         import numpy as np
 
         # Create image data
-        data = np.frombuffer(make_data_bytes(size), dtype=np.uint8).reshape(-1)
-        padded_size = ((len(data) + 2) // 3) * 3
-        data = np.pad(data, (0, padded_size - len(data)))
-        pixels = len(data) // 3
+        raw_data: NDArray[np.uint8] = np.frombuffer(make_data_bytes(size), dtype=np.uint8)
+        padded_size = ((len(raw_data) + 2) // 3) * 3
+        padded_data: NDArray[np.uint8] = np.pad(raw_data, (0, padded_size - len(raw_data)))
+        pixels = len(padded_data) // 3
         height = max(1, int(pixels**0.5))
         width = pixels // height
-        data = data[: height * width * 3]
+        final_data: NDArray[np.uint8] = padded_data[: height * width * 3]
 
         # Create ROS Image message
-        msg = ROSImage()
+        msg = ROSImage()  # type: ignore[no-untyped-call]
         msg.height = height
         msg.width = width
         msg.encoding = "rgb8"
         msg.step = width * 3
-        msg.data = data.tobytes()
+        msg.data = bytes(final_data)
 
         topic = RawROSTopic(topic="/benchmark/ros", ros_type=ROSImage)
         return (topic, msg)
@@ -265,5 +352,51 @@ if ROS_AVAILABLE:
         Case(
             pubsub_context=ros_reliable_pubsub_channel,
             msg_gen=ros_msggen,
+        )
+    )
+
+    @contextmanager
+    def dimos_ros_best_effort_pubsub_channel() -> Generator[DimosROS, None, None]:
+        qos = QoSProfile(  # type: ignore[no-untyped-call]
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=5000,
+        )
+        ros_pubsub = DimosROS(node_name="benchmark_dimos_ros_best_effort", qos=qos)
+        ros_pubsub.start()
+        yield ros_pubsub
+        ros_pubsub.stop()
+
+    @contextmanager
+    def dimos_ros_reliable_pubsub_channel() -> Generator[DimosROS, None, None]:
+        qos = QoSProfile(  # type: ignore[no-untyped-call]
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            depth=5000,
+        )
+        ros_pubsub = DimosROS(node_name="benchmark_dimos_ros_reliable", qos=qos)
+        ros_pubsub.start()
+        yield ros_pubsub
+        ros_pubsub.stop()
+
+    def dimos_ros_msggen(size: int) -> tuple[ROSTopic, Image]:
+        topic = ROSTopic(topic="/benchmark/dimos_ros", msg_type=Image)
+        return (topic, make_data_image(size))
+
+    # commented to save benchmarking time,
+    # since reliable and best effort are very similar in performance for local pubsub
+    # testcases.append(
+    #     Case(
+    #         pubsub_context=dimos_ros_best_effort_pubsub_channel,
+    #         msg_gen=dimos_ros_msggen,
+    #     )
+    # )
+
+    testcases.append(
+        Case(
+            pubsub_context=dimos_ros_reliable_pubsub_channel,
+            msg_gen=dimos_ros_msggen,
         )
     )
