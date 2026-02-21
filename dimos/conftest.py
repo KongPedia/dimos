@@ -18,6 +18,8 @@ import threading
 from dotenv import load_dotenv
 import pytest
 
+from dimos.protocol.service.lcmservice import autoconf
+
 load_dotenv()
 
 
@@ -49,6 +51,18 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _autoconf(request):
+    """Run autoconf() before all tests with capture suspended so people see `sudo` commands."""
+
+    capman = request.config.pluginmanager.getplugin("capturemanager")
+    capman.suspend_global_capture(in_=True)
+    try:
+        autoconf()
+    finally:
+        capman.resume_global_capture()
 
 
 _session_threads = set()

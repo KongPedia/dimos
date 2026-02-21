@@ -24,15 +24,12 @@ from dimos import core
 from dimos.core import Module, Out, rpc
 from dimos.msgs.sensor_msgs import Image
 from dimos.perception.spatial_perception import SpatialMemory
-from dimos.protocol import pubsub
 from dimos.robot.unitree.type.odometry import Odometry
 from dimos.utils.data import get_data
 from dimos.utils.logging_config import setup_logger
 from dimos.utils.testing import TimedSensorReplay
 
 logger = setup_logger()
-
-pubsub.lcm.autoconf()
 
 
 class VideoReplayModule(Module):
