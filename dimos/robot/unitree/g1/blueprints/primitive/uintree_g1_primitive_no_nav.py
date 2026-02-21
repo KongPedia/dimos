@@ -76,9 +76,8 @@ match global_config.viewer_backend:
     case _:
         _with_vis = autoconnect()
 
-uintree_g1_primitive_no_nav = (
+_camera = (
     autoconnect(
-        _with_vis,
         camera_module(
             transform=Transform(
                 translation=Vector3(0.05, 0.0, 0.6),  # height of camera on G1 robot
@@ -93,6 +92,15 @@ uintree_g1_primitive_no_nav = (
                 camera_info=zed.CameraInfo.SingleWebcam,
             ),
         ),
+    )
+    if not global_config.simulation
+    else autoconnect()
+)
+
+uintree_g1_primitive_no_nav = (
+    autoconnect(
+        _with_vis,
+        _camera,
         voxel_mapper(voxel_size=0.1),
         cost_mapper(),
         wavefront_frontier_explorer(),
@@ -118,9 +126,9 @@ uintree_g1_primitive_no_nav = (
             ("goal_pose", PoseStamped): LCMTransport("/goal_pose", PoseStamped),
             ("goal_reached", Bool): LCMTransport("/goal_reached", Bool),
             ("cancel_goal", Bool): LCMTransport("/cancel_goal", Bool),
-            # Camera topics (if camera module is added)
-            ("color_image", Image): LCMTransport("/g1/color_image", Image),
-            ("camera_info", CameraInfo): LCMTransport("/g1/camera_info", CameraInfo),
+            # Camera topics
+            ("color_image", Image): LCMTransport("/color_image", Image),
+            ("camera_info", CameraInfo): LCMTransport("/camera_info", CameraInfo),
         }
     )
 )
