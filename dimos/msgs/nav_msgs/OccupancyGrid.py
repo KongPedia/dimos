@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 from functools import lru_cache
+from pathlib import Path
 import time
 from typing import TYPE_CHECKING, BinaryIO
 
@@ -28,7 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from dimos.msgs.geometry_msgs import Pose, Vector3, VectorLike
+from dimos.msgs.geometry_msgs import Pose, Quaternion, Vector3, VectorLike
 from dimos.types.timestamped import Timestamped
 
 
@@ -39,8 +40,6 @@ def _get_matplotlib_cmap(name: str):  # type: ignore[no-untyped-def]
 
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from numpy.typing import NDArray
     from rerun._baseclasses import Archetype
 
@@ -189,12 +188,79 @@ class OccupancyGrid(Timestamped):
 
     @classmethod
     def from_path(cls, path: Path) -> OccupancyGrid:
+        path = Path(path)
         match path.suffix.lower():
             case ".npy":
                 return cls(grid=np.load(path))
             case ".png":
                 img = Image.open(path).convert("L")
                 return cls(grid=np.array(img).astype(np.int8))
+            case ".yaml" | ".yml":
+                try:
+                    import yaml  # type: ignore[import-untyped]
+                except ImportError as e:
+                    raise ImportError("PyYAML is required to load nav2 map YAML files") from e
+
+                with open(path) as f:
+                    cfg = yaml.safe_load(f) or {}
+
+                image_path_raw = cfg.get("image")
+                if not image_path_raw:
+                    raise ValueError(f"Invalid map YAML (missing 'image'): {path}")
+
+                image_path = Path(image_path_raw)
+                if not image_path.is_absolute():
+                    image_path = (path.parent / image_path).resolve()
+
+                mode = str(cfg.get("mode", "trinary")).lower()
+                resolution = float(cfg.get("resolution", 0.05))
+                origin_cfg = cfg.get("origin", [0.0, 0.0, 0.0])
+                if not isinstance(origin_cfg, list | tuple) or len(origin_cfg) < 3:
+                    origin_cfg = [0.0, 0.0, 0.0]
+                origin_x = float(origin_cfg[0])
+                origin_y = float(origin_cfg[1])
+                origin_yaw = float(origin_cfg[2])
+                negate = int(cfg.get("negate", 0))
+                occupied_thresh = float(cfg.get("occupied_thresh", 0.65))
+                free_thresh = float(cfg.get("free_thresh", 0.25))
+
+                image_u8 = np.array(Image.open(image_path).convert("L"), dtype=np.uint8)
+                # ROS map_server semantics: occupancy (0,0) is the lower-left map cell,
+                # while image row 0 is top. Flip vertically to match nav_msgs indexing.
+                image_u8 = np.flipud(image_u8)
+
+                # Convert grayscale image into occupancy probability (0.0 free -> 1.0 occupied).
+                pixel = image_u8.astype(np.float32) / 255.0
+                occ_prob = pixel if negate else (1.0 - pixel)
+
+                if mode == "trinary":
+                    grid = np.full(image_u8.shape, CostValues.UNKNOWN, dtype=np.int8)
+                    grid[occ_prob > occupied_thresh] = CostValues.OCCUPIED
+                    grid[occ_prob < free_thresh] = CostValues.FREE
+                elif mode == "scale":
+                    grid = np.full(image_u8.shape, CostValues.UNKNOWN, dtype=np.int8)
+                    occupied = occ_prob > occupied_thresh
+                    free = occ_prob < free_thresh
+                    between = ~(occupied | free)
+                    grid[occupied] = CostValues.OCCUPIED
+                    grid[free] = CostValues.FREE
+                    if np.any(between):
+                        denom = max(occupied_thresh - free_thresh, 1e-6)
+                        scaled = (occ_prob[between] - free_thresh) / denom
+                        scaled = np.clip(scaled, 0.0, 1.0)
+                        grid[between] = np.rint(scaled * 99.0).astype(np.int8)
+                elif mode == "raw":
+                    # Nav2 raw mode: 255 is unknown, remaining values are treated as occupancy scale.
+                    grid = np.rint((image_u8.astype(np.float32) / 255.0) * 100.0).astype(np.int8)
+                    grid[image_u8 == 255] = CostValues.UNKNOWN
+                else:
+                    raise NotImplementedError(f"Unsupported nav2 map mode: {mode}")
+
+                origin_pose = Pose(
+                    position=Vector3(origin_x, origin_y, 0.0),
+                    orientation=Quaternion.from_euler(Vector3(0.0, 0.0, origin_yaw)),
+                )
+                return cls(grid=grid, resolution=resolution, origin=origin_pose)
             case _:
                 raise NotImplementedError(f"Unsupported file format: {path.suffix}")
 

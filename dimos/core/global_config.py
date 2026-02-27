@@ -28,8 +28,15 @@ def _get_all_numbers(s: str) -> list[float]:
 
 class GlobalConfig(BaseSettings):
     robot_ip: str | None = None
+    unitree_connection: Literal["webrtc", "replay", "mujoco", "ros"] | None = None
     simulation: bool = False
     replay: bool = False
+    ros_env_namespace: str = "env0"
+    ros_robot_namespace: str = "robot0"
+    ros_pointcloud_topic: str | None = None
+    ros_odom_topic: str | None = None
+    ros_image_topic: str | None = None
+    ros_cmd_vel_topic: str | None = None
     viewer_backend: ViewerBackend = "rerun-web"
     n_dask_workers: int = 2
     memory_limit: str = "auto"
@@ -62,6 +69,8 @@ class GlobalConfig(BaseSettings):
 
     @property
     def unitree_connection_type(self) -> str:
+        if self.unitree_connection is not None:
+            return self.unitree_connection
         if self.replay:
             return "replay"
         if self.simulation:

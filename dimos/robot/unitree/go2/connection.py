@@ -35,6 +35,7 @@ from dimos.msgs.geometry_msgs import (
 from dimos.msgs.sensor_msgs import CameraInfo, Image, PointCloud2
 from dimos.msgs.sensor_msgs.Image import ImageFormat
 from dimos.robot.unitree.connection import UnitreeWebRTCConnection
+from dimos.robot.unitree.go2.ros_sim_connection import ROSSimConnection
 from dimos.utils.data import get_data
 from dimos.utils.decorators.decorators import simple_mcache
 from dimos.utils.testing.replay import TimedSensorReplay, TimedSensorStorage
@@ -168,6 +169,12 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         self,
         ip: str | None = None,
         cfg: GlobalConfig = global_config,
+        ros_env_namespace: str | None = None,
+        ros_robot_namespace: str | None = None,
+        ros_lidar_topic: str | None = None,
+        ros_odom_topic: str | None = None,
+        ros_image_topic: str | None = None,
+        ros_cmd_vel_topic: str | None = None,
         *args,
         **kwargs,
     ) -> None:
@@ -183,6 +190,15 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             from dimos.robot.unitree.mujoco_connection import MujocoConnection
 
             self.connection = MujocoConnection(self._global_config)
+        elif ip in ["ros", "ros2"] or connection_type == "ros":
+            self.connection = ROSSimConnection(
+                ros_env_namespace=ros_env_namespace or self._global_config.ros_env_namespace,
+                ros_robot_namespace=ros_robot_namespace or self._global_config.ros_robot_namespace,
+                lidar_topic=ros_lidar_topic or self._global_config.ros_pointcloud_topic,
+                odom_topic=ros_odom_topic or self._global_config.ros_odom_topic,
+                image_topic=ros_image_topic or self._global_config.ros_image_topic,
+                cmd_vel_topic=ros_cmd_vel_topic or self._global_config.ros_cmd_vel_topic,
+            )
         else:
             assert ip is not None, "IP address must be provided"
             self.connection = UnitreeWebRTCConnection(ip)
@@ -210,7 +226,12 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             self.color_image.publish(image)
             self._latest_video_frame = image
 
-        self._disposables.add(self.connection.lidar_stream().subscribe(self.lidar.publish))
+        def onlidar(pointcloud: PointCloud2) -> None:
+            self.lidar.publish(pointcloud)
+            if self.pointcloud.transport:
+                self.pointcloud.publish(pointcloud)
+
+        self._disposables.add(self.connection.lidar_stream().subscribe(onlidar))
         self._disposables.add(self.connection.odom_stream().subscribe(self._publish_tf))
         self._disposables.add(self.connection.video_stream().subscribe(onimage))
         self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))

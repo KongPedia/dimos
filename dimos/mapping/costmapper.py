@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 import time
 
 from reactivex import operators as ops
@@ -48,6 +49,7 @@ class CostMapper(Module):
     def __init__(self, cfg: GlobalConfig = global_config, **kwargs: object) -> None:
         super().__init__(**kwargs)
         self._global_config = cfg
+        self._preloaded_costmap: OccupancyGrid | None = None
 
     @rpc
     def start(self) -> None:
@@ -77,6 +79,12 @@ class CostMapper(Module):
 
     # @timed()  # TODO: fix thread leak in timed decorator
     def _calculate_costmap(self, msg: PointCloud2) -> OccupancyGrid:
+        if self._global_config.mujoco_global_costmap_from_occupancy:
+            if self._preloaded_costmap is None:
+                path = Path(self._global_config.mujoco_global_costmap_from_occupancy)
+                self._preloaded_costmap = OccupancyGrid.from_path(path)
+            return self._preloaded_costmap
+
         fn = OCCUPANCY_ALGOS[self.config.algo]
         return fn(msg, **asdict(self.config.config))
 
