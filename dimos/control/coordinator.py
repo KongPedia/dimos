@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from dimos.control.components import (
     TWIST_SUFFIX_MAP,
@@ -84,6 +84,10 @@ class TaskConfig:
         priority: Task priority (higher wins arbitration)
         model_path: Path to URDF/MJCF for IK solver (cartesian_ik/teleop_ik only)
         ee_joint_id: End-effector joint ID in model (cartesian_ik/teleop_ik only)
+        hand: "left" or "right" controller hand (teleop_ik only)
+        gripper_joint: Joint name for gripper virtual joint
+        gripper_open_pos: Gripper position at trigger 0.0
+        gripper_closed_pos: Gripper position at trigger 1.0
     """
 
     name: str
@@ -93,7 +97,11 @@ class TaskConfig:
     # Cartesian IK / Teleop IK specific
     model_path: str | Path | None = None
     ee_joint_id: int = 6
-    hand: str = ""  # teleop_ik only: "left" or "right" controller
+    hand: Literal["left", "right"] | None = None  # teleop_ik only
+    # Teleop IK gripper specific
+    gripper_joint: str | None = None
+    gripper_open_pos: float = 0.0
+    gripper_closed_pos: float = 0.0
 
 
 @dataclass
@@ -327,6 +335,9 @@ class ControlCoordinator(Module[ControlCoordinatorConfig]):
                     ee_joint_id=cfg.ee_joint_id,
                     priority=cfg.priority,
                     hand=cfg.hand,
+                    gripper_joint=cfg.gripper_joint,
+                    gripper_open_pos=cfg.gripper_open_pos,
+                    gripper_closed_pos=cfg.gripper_closed_pos,
                 ),
             )
 
@@ -345,6 +356,7 @@ class ControlCoordinator(Module[ControlCoordinatorConfig]):
     ) -> bool:
         """Register a hardware adapter with the coordinator."""
         is_base = component.hardware_type == HardwareType.BASE
+
         if is_base != isinstance(adapter, TwistBaseAdapter):
             raise TypeError(
                 f"Hardware type / adapter mismatch for '{component.hardware_id}': "

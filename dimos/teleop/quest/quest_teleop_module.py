@@ -145,6 +145,7 @@ class QuestTeleopModule(Module[QuestTeleopConfig]):
             logger.info(f"Subscribed to: {', '.join(connected)}")
 
         self._start_server()
+        self._start_control_loop()
         logger.info("Quest Teleoperation Module started")
 
     @rpc

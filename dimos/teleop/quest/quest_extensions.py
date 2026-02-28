@@ -26,6 +26,7 @@ from typing import Any
 from dimos.core.stream import Out
 from dimos.msgs.geometry_msgs import PoseStamped, TwistStamped
 from dimos.teleop.quest.quest_teleop_module import Hand, QuestTeleopConfig, QuestTeleopModule
+from dimos.teleop.quest.quest_types import Buttons, QuestControllerState
 from dimos.teleop.utils.teleop_visualization import (
     visualize_buttons,
     visualize_pose,
@@ -124,6 +125,19 @@ class ArmTeleopModule(QuestTeleopModule):
                 frame_id=task_name,
             )
         super()._publish_msg(hand, output_msg)
+
+    def _publish_button_state(
+        self,
+        left: QuestControllerState | None,
+        right: QuestControllerState | None,
+    ) -> None:
+        """Publish Buttons with analog triggers packed into bits 16-29."""
+        buttons = Buttons.from_controllers(left, right)
+        buttons.pack_analog_triggers(
+            left=left.trigger if left is not None else 0.0,
+            right=right.trigger if right is not None else 0.0,
+        )
+        self.buttons.publish(buttons)
 
 
 class VisualizingTeleopModule(ArmTeleopModule):
