@@ -34,6 +34,7 @@ from dimos.msgs.geometry_msgs import (
 )
 from dimos.msgs.sensor_msgs import CameraInfo, Image, PointCloud2
 from dimos.msgs.sensor_msgs.Image import ImageFormat
+from dimos.msgs.tf2_msgs import TFMessage
 from dimos.robot.unitree.connection import UnitreeWebRTCConnection
 from dimos.robot.unitree.go2.ros_sim_connection import ROSSimConnection
 from dimos.utils.data import get_data
@@ -148,6 +149,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     lidar: Out[PointCloud2]
     color_image: Out[Image]
     camera_info: Out[CameraInfo]
+    tf_msg: Out[TFMessage]
 
     connection: Go2ConnectionProtocol
     camera_info_static: CameraInfo = _camera_info_static()
@@ -289,6 +291,8 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     def _publish_tf(self, msg: PoseStamped) -> None:
         transforms = self._odom_to_tf(msg)
         self.tf.publish(*transforms)
+        if self.tf_msg.transport:
+            self.tf_msg.publish(TFMessage(*transforms))
         if self.odom.transport:
             self.odom.publish(msg)
 

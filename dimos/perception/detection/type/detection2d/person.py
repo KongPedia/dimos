@@ -220,8 +220,8 @@ class Detection2DPerson(Detection2DBBox):
 
     @simple_mcache
     def is_valid(self) -> bool:
-        valid_keypoints = sum(1 for score in self.keypoint_scores if score > 0.8)
-        return valid_keypoints >= 5
+        valid_keypoints = sum(1 for score in self.keypoint_scores if score > 0.5)
+        return valid_keypoints >= 1
 
     @property
     def width(self) -> float:

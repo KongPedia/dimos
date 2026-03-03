@@ -92,7 +92,7 @@ class ROSSimConnection(Resource):
         self.lidar_topic = _resolve_topic(lidar_topic, ros_env_namespace, "point_cloud2")
         self.odom_topic = _resolve_topic(odom_topic, ros_env_namespace, "odom")
         self.image_topic = _resolve_topic(image_topic, ros_robot_namespace, "camera/image_raw")
-        self.cmd_vel_topic = _resolve_topic(cmd_vel_topic, ros_robot_namespace, "cmd_vel_out")
+        self.cmd_vel_topic = _resolve_topic(cmd_vel_topic, ros_robot_namespace, "cmd_vel")
 
         self._ros = RawROS(node_name=node_name, qos=_get_sensor_qos())
         self._sensor_qos = _get_sensor_qos()

@@ -40,6 +40,7 @@ from dimos.utils.reactive import backpressure
 class Config(ModuleConfig):
     max_freq: float = 10
     detector: Callable[[Any], Detector] | None = Yolo2DDetector
+    publish_annotations: bool = True
     publish_detection_images: bool = True
     camera_info: CameraInfo = None  # type: ignore[assignment]
     filter: list[Filter2D] | Filter2D | None = None
@@ -140,9 +141,10 @@ class Detection2DModule(Module):
             lambda det: self.detections.publish(det.to_ros_detection2d_array())
         )
 
-        self.detection_stream_2d().subscribe(
-            lambda det: self.annotations.publish(det.to_foxglove_annotations())
-        )
+        if self.config.publish_annotations:
+            self.detection_stream_2d().subscribe(
+                lambda det: self.annotations.publish(det.to_foxglove_annotations())
+            )
 
         def publish_cropped_images(detections: ImageDetections2D) -> None:
             for index, detection in enumerate(detections[:3]):

@@ -30,6 +30,7 @@ __getattr__, __dir__, __all__ = lazy.attach(
         "smart._with_jpeg": ["_with_jpeglcm"],
         "smart.unitree_go2": ["unitree_go2"],
         "smart.unitree_go2_detection": ["unitree_go2_detection"],
+        "smart.unitree_go2_battlebang_bridge": ["unitree_go2_battlebang_bridge"],
         "smart.unitree_go2_ros": ["unitree_go2_ros"],
         "smart.unitree_go2_spatial": ["unitree_go2_spatial"],
         "smart.unitree_go2_vlm_stream_test": ["unitree_go2_vlm_stream_test"],

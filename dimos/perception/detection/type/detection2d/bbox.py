@@ -371,7 +371,13 @@ class Detection2DBBox(Detection2D):
         confidence = 0.0
         if ros_det.results:
             hypothesis = ros_det.results[0].hypothesis
-            class_id = hypothesis.class_id
+            class_id_raw = hypothesis.class_id
+            # ROS2 vision_msgs uses string class_id.
+            # Keep internal representation numeric when possible.
+            if isinstance(class_id_raw, str):
+                class_id = int(class_id_raw) if class_id_raw.isdigit() else 0
+            else:
+                class_id = int(class_id_raw)
             confidence = hypothesis.score
 
         # Extract track_id
@@ -399,7 +405,7 @@ class Detection2DBBox(Detection2D):
             results=[
                 ObjectHypothesisWithPose(
                     ObjectHypothesis(
-                        class_id=self.class_id,
+                        class_id=str(self.class_id),
                         score=self.confidence,
                     )
                 )

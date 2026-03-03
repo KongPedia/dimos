@@ -197,12 +197,18 @@ class WebsocketVisModule(Module):
         if self._uvicorn_server:
             self._uvicorn_server.should_exit = True
 
-        if self.sio and self._broadcast_loop and not self._broadcast_loop.is_closed():
+        # Prevent new emits from being scheduled while shutting down.
+        sio = self.sio
+        self.sio = None
 
-            async def _disconnect_all() -> None:
-                await self.sio.disconnect()
-
-            asyncio.run_coroutine_threadsafe(_disconnect_all(), self._broadcast_loop)
+        if sio and self._broadcast_loop and not self._broadcast_loop.is_closed():
+            shutdown = getattr(sio, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(shutdown(), self._broadcast_loop)
+                    fut.result(timeout=1.0)
+                except Exception as e:
+                    logger.debug(f"Socket.IO shutdown did not complete cleanly: {e}")
 
         if self._broadcast_loop and not self._broadcast_loop.is_closed():
             self._broadcast_loop.call_soon_threadsafe(self._broadcast_loop.stop)
@@ -393,8 +399,11 @@ class WebsocketVisModule(Module):
         }
 
     def _emit(self, event: str, data: Any) -> None:
-        if self._broadcast_loop and not self._broadcast_loop.is_closed():
-            asyncio.run_coroutine_threadsafe(self.sio.emit(event, data), self._broadcast_loop)
+        if self.sio and self._broadcast_loop and not self._broadcast_loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(self.sio.emit(event, data), self._broadcast_loop)
+            except Exception as e:
+                logger.debug(f"Failed to schedule emit '{event}': {e}")
 
 
 websocket_vis = WebsocketVisModule.blueprint
