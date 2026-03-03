@@ -31,12 +31,6 @@ class GlobalConfig(BaseSettings):
     unitree_connection: Literal["webrtc", "replay", "mujoco", "ros"] | None = None
     simulation: bool = False
     replay: bool = False
-    ros_env_namespace: str = "env0"
-    ros_robot_namespace: str = "robot0"
-    ros_pointcloud_topic: str | None = None
-    ros_odom_topic: str | None = None
-    ros_image_topic: str | None = None
-    ros_cmd_vel_topic: str | None = None
     viewer_backend: ViewerBackend = "rerun-web"
     n_dask_workers: int = 2
     memory_limit: str = "auto"

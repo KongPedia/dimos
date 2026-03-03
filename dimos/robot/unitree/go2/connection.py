@@ -169,16 +169,20 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         self,
         ip: str | None = None,
         cfg: GlobalConfig = global_config,
-        ros_env_namespace: str | None = None,
-        ros_robot_namespace: str | None = None,
-        ros_lidar_topic: str | None = None,
-        ros_odom_topic: str | None = None,
-        ros_image_topic: str | None = None,
-        ros_cmd_vel_topic: str | None = None,
         *args,
         **kwargs,
     ) -> None:
         self._global_config = cfg
+
+        ros_env_namespace = kwargs.pop("ros_env_namespace", None)
+        ros_robot_namespace = kwargs.pop("ros_robot_namespace", None)
+        ros_pointcloud_topic = kwargs.pop("ros_pointcloud_topic", None)
+        if ros_pointcloud_topic is None:
+            # Backward compatibility with older keyword argument.
+            ros_pointcloud_topic = kwargs.pop("ros_lidar_topic", None)
+        ros_odom_topic = kwargs.pop("ros_odom_topic", None)
+        ros_image_topic = kwargs.pop("ros_image_topic", None)
+        ros_cmd_vel_topic = kwargs.pop("ros_cmd_vel_topic", None)
 
         ip = ip if ip is not None else self._global_config.robot_ip
 
@@ -191,14 +195,20 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
 
             self.connection = MujocoConnection(self._global_config)
         elif ip in ["ros", "ros2"] or connection_type == "ros":
-            self.connection = ROSSimConnection(
-                ros_env_namespace=ros_env_namespace or self._global_config.ros_env_namespace,
-                ros_robot_namespace=ros_robot_namespace or self._global_config.ros_robot_namespace,
-                lidar_topic=ros_lidar_topic or self._global_config.ros_pointcloud_topic,
-                odom_topic=ros_odom_topic or self._global_config.ros_odom_topic,
-                image_topic=ros_image_topic or self._global_config.ros_image_topic,
-                cmd_vel_topic=ros_cmd_vel_topic or self._global_config.ros_cmd_vel_topic,
-            )
+            ros_connection_kwargs: dict[str, str] = {}
+            if ros_env_namespace is not None:
+                ros_connection_kwargs["ros_env_namespace"] = ros_env_namespace
+            if ros_robot_namespace is not None:
+                ros_connection_kwargs["ros_robot_namespace"] = ros_robot_namespace
+            if ros_pointcloud_topic is not None:
+                ros_connection_kwargs["lidar_topic"] = ros_pointcloud_topic
+            if ros_odom_topic is not None:
+                ros_connection_kwargs["odom_topic"] = ros_odom_topic
+            if ros_image_topic is not None:
+                ros_connection_kwargs["image_topic"] = ros_image_topic
+            if ros_cmd_vel_topic is not None:
+                ros_connection_kwargs["cmd_vel_topic"] = ros_cmd_vel_topic
+            self.connection = ROSSimConnection(**ros_connection_kwargs)
         else:
             assert ip is not None, "IP address must be provided"
             self.connection = UnitreeWebRTCConnection(ip)
@@ -226,12 +236,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             self.color_image.publish(image)
             self._latest_video_frame = image
 
-        def onlidar(pointcloud: PointCloud2) -> None:
-            self.lidar.publish(pointcloud)
-            if self.pointcloud.transport:
-                self.pointcloud.publish(pointcloud)
-
-        self._disposables.add(self.connection.lidar_stream().subscribe(onlidar))
+        self._disposables.add(self.connection.lidar_stream().subscribe(self.lidar.publish))
         self._disposables.add(self.connection.odom_stream().subscribe(self._publish_tf))
         self._disposables.add(self.connection.video_stream().subscribe(onimage))
         self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))
