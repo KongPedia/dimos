@@ -15,13 +15,20 @@
 
 """Headless Unitree Go2 navigation control for Jetson.
 
-This script runs the native Go2 navigation stack without the web UI and lets you
-control goal navigation / frontier exploration from the terminal.
+Supports two modes:
+  - Terminal REPL: interactive goal/explore commands (default)
+  - MQTT mode: receive move/patrol/stop commands from broker (--mqtt-broker)
 
 Usage:
     export ROBOT_IP=10.2.80.101
-    python scripts/go2_headless_nav.py --robot-ip "$ROBOT_IP" \
-        --navigation-voxel-size 0.2 --planner-robot-speed 0.7
+    # Terminal REPL:
+    python scripts/go2_headless_nav.py --robot-ip "$ROBOT_IP" \\
+        --map-file /path/to/lit5f_field.yaml --planner-robot-speed 0.8
+
+    # MQTT mode:
+    python scripts/go2_headless_nav.py --robot-ip "$ROBOT_IP" \\
+        --map-file /path/to/lit5f_field.yaml \\
+        --mqtt-broker 10.2.80.46 --robot-id go2_02
 """
 
 from __future__ import annotations
@@ -29,6 +36,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import signal
+import sys
 import threading
 import time
 from typing import Any
@@ -53,8 +62,13 @@ from dimos.navigation.replanning_a_star.module import (
 )
 from dimos.protocol import pubsub
 from dimos.robot.unitree.go2.connection import GO2Connection, go2_connection
+from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 from unitree_webrtc_connect.constants import RTC_TOPIC
 
+
+# =============================================================================
+# Helpers
+# =============================================================================
 
 def _resolve_voxel_device(requested_device: str) -> str:
     if not requested_device.upper().startswith("CUDA"):
@@ -86,20 +100,109 @@ def _pose_from_xy_yaw(x: float, y: float, yaw_deg: float) -> PoseStamped:
     )
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Headless Go2 navigation terminal control")
-    parser.add_argument("--robot-ip", required=True, help="Unitree Go2 IP address")
-    parser.add_argument("--n-dask-workers", type=int, default=6, help="Dask workers")
-    parser.add_argument("--planner-robot-speed", type=float, default=None)
-    parser.add_argument("--navigation-voxel-size", type=float, default=0.2)
-    parser.add_argument("--goal-timeout", type=float, default=15.0)
-    parser.add_argument("--voxel-device", default="CUDA:0", help="Voxel mapper device")
-    parser.add_argument("--skip-recovery", action="store_true", help="Skip recovery stand on startup")
-    parser.add_argument("--mqtt-broker", type=str, default=None, help="MQTT broker host (enables MQTT mode)")
-    parser.add_argument("--mqtt-port", type=int, default=1883, help="MQTT broker port")
-    parser.add_argument("--robot-id", type=str, default="go2_02", help="Robot ID for MQTT topics")
-    return parser
+# =============================================================================
+# MQTT Bridge (move / patrol / stop)
+# =============================================================================
 
+class MQTTNavigationBridge:
+    """Bridge between MQTT commands and dimos navigation."""
+
+    def __init__(
+        self,
+        broker_host: str,
+        broker_port: int,
+        robot_id: str,
+        navigator: ReplanningAStarPlanner,
+        explorer: WavefrontFrontierExplorer,
+        connection: GO2Connection,
+    ) -> None:
+        self.broker_host = broker_host
+        self.broker_port = broker_port
+        self.robot_id = robot_id
+        self.navigator = navigator
+        self.explorer = explorer
+        self.connection = connection
+        self.running = False
+
+        self.client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"go2_nav_{robot_id}",
+        )
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+
+    def start(self) -> None:
+        try:
+            print(f"[MQTT] Connecting to {self.broker_host}:{self.broker_port}...")
+            self.client.connect(self.broker_host, self.broker_port, 60)
+            self.running = True
+            self.client.loop_start()
+        except Exception as e:
+            print(f"[MQTT] Connection error: {e}")
+            raise
+
+    def stop(self) -> None:
+        self.running = False
+        self.client.loop_stop()
+        self.client.disconnect()
+        print("[MQTT] Disconnected")
+
+    def _on_connect(
+        self, client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any
+    ) -> None:
+        if reason_code == 0:
+            topic_move   = f"bb/v1/robot/{self.robot_id}/cmd/move"
+            topic_patrol = f"bb/v1/robot/{self.robot_id}/cmd/patrol"
+            topic_stop   = f"bb/v1/robot/{self.robot_id}/cmd/stop"
+            client.subscribe(topic_move)
+            client.subscribe(topic_patrol)
+            client.subscribe(topic_stop)
+            print(f"[MQTT] Subscribed to {topic_move}, {topic_patrol}, {topic_stop}")
+        else:
+            print(f"[MQTT] Connection failed: {reason_code}")
+
+    def _on_message(self, client: Any, userdata: Any, msg: Any) -> None:
+        try:
+            payload = json.loads(msg.payload.decode("utf-8"))
+            print(f"[MQTT] Received: {msg.topic} -> {payload}")
+
+            if "cmd/move" in msg.topic:
+                self._handle_move(payload)
+            elif "cmd/patrol" in msg.topic:
+                self._handle_patrol(payload)
+            elif "cmd/stop" in msg.topic:
+                cancelled = self.navigator.cancel_goal()
+                print(f"[MQTT] Goal cancelled: {cancelled}")
+
+        except Exception as e:
+            print(f"[MQTT] Error processing message: {e}")
+
+    def _handle_move(self, payload: dict) -> None:
+        x       = float(payload.get("x", 0.0))
+        y       = float(payload.get("y", 0.0))
+        yaw_deg = float(payload.get("yaw", 0.0))
+        goal    = _pose_from_xy_yaw(x, y, yaw_deg)
+        accepted = self.navigator.set_goal(goal)
+        print(f"[MQTT] Move goal: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}°) accepted={accepted}")
+
+    def _handle_patrol(self, payload: dict) -> None:
+        points = payload.get("points", [])
+        if not points:
+            print("[MQTT] Empty patrol path")
+            return
+        print(f"[MQTT] Patrol with {len(points)} waypoints")
+        # Navigate to first waypoint; TODO: full waypoint sequencing
+        p = points[0]
+        x, y = float(p[0]), float(p[1])
+        yaw_deg = float(p[2]) if len(p) > 2 else 0.0
+        goal = _pose_from_xy_yaw(x, y, yaw_deg)
+        accepted = self.navigator.set_goal(goal)
+        print(f"[MQTT] Patrol wp[0]: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}°) accepted={accepted}")
+
+
+# =============================================================================
+# Terminal REPL helpers
+# =============================================================================
 
 def _print_help() -> None:
     print("\nCommands:")
@@ -120,114 +223,42 @@ def _handle_goal_command(parts: list[str], navigator: ReplanningAStarPlanner) ->
     if len(parts) not in {3, 4}:
         print("usage: goal <x> <y> [yaw_deg]")
         return
-
-    x = float(parts[1])
-    y = float(parts[2])
+    x       = float(parts[1])
+    y       = float(parts[2])
     yaw_deg = float(parts[3]) if len(parts) == 4 else 0.0
-    goal = _pose_from_xy_yaw(x, y, yaw_deg)
+    goal    = _pose_from_xy_yaw(x, y, yaw_deg)
     accepted = navigator.set_goal(goal)
     print(f"goal accepted={accepted} -> ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}deg)")
 
 
-def _handle_explore_command(parts: list[str], explorer: WavefrontFrontierExplorer) -> None:
+def _handle_explore_command(
+    parts: list[str], explorer: WavefrontFrontierExplorer
+) -> None:
     if len(parts) != 2:
         print("usage: explore <start|stop|status>")
         return
-
     action = parts[1].lower()
     if action == "start":
         print(f"explore started={explorer.explore()}")
-        return
-    if action == "stop":
+    elif action == "stop":
         print(f"explore stopped={explorer.stop_exploration()}")
-        return
-    if action == "status":
+    elif action == "status":
         print(f"explore active={explorer.is_exploration_active()}")
-        return
-
-    print("usage: explore <start|stop|status>")
+    else:
+        print("usage: explore <start|stop|status>")
 
 
 def _handle_robot_command(parts: list[str], connection: GO2Connection) -> None:
-    if len(parts) != 1:
-        print(f"usage: {parts[0]}")
-        return
-
     cmd = parts[0].lower()
     if cmd == "recovery":
-        print("[INFO] Running recovery stand to unlock robot...")
-        result = connection.publish_request(
-            RTC_TOPIC["SPORT_MOD"],
-            {"api_id": 1006}  # RecoveryStand
-        )
+        print("[INFO] Running recovery stand...")
+        result = connection.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": 1006})
         print(f"recovery result={result}")
         time.sleep(1.0)
-        return
-
-    if cmd == "standup":
-        print("[INFO] Making robot stand up...")
-        result = connection.standup()
-        print(f"standup result={result}")
-        return
-
-    if cmd == "liedown":
-        print("[INFO] Making robot lie down...")
-        result = connection.liedown()
-        print(f"liedown result={result}")
-        return
-
-
-def _mqtt_listener(
-    broker_host: str,
-    broker_port: int,
-    robot_id: str,
-    navigator: ReplanningAStarPlanner,
-    explorer: WavefrontFrontierExplorer,
-    connection: GO2Connection,
-) -> None:
-    """Background thread to listen for MQTT commands"""
-    def on_connect(client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
-        if reason_code == 0:
-            topic_move = f"bb/v1/robot/{robot_id}/cmd/move"
-            topic_stop = f"bb/v1/robot/{robot_id}/cmd/stop"
-            client.subscribe(topic_move)
-            client.subscribe(topic_stop)
-            print(f"[MQTT] Connected and subscribed to {topic_move}, {topic_stop}")
-        else:
-            print(f"[MQTT] Connection failed: {reason_code}")
-
-    def on_message(client: Any, userdata: Any, msg: Any) -> None:
-        try:
-            payload = json.loads(msg.payload.decode('utf-8'))
-            print(f"[MQTT] Received: {msg.topic} -> {payload}")
-            
-            if "cmd/move" in msg.topic:
-                params = payload.get("params", payload)
-                x = float(params["x"])
-                y = float(params["y"])
-                yaw_deg = float(params.get("yaw", 0.0))
-                
-                goal = _pose_from_xy_yaw(x, y, yaw_deg)
-                accepted = navigator.set_goal(goal)
-                print(f"[MQTT] Goal set: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}deg) accepted={accepted}")
-            
-            elif "cmd/stop" in msg.topic:
-                cancelled = navigator.cancel_goal()
-                print(f"[MQTT] Goal cancelled: {cancelled}")
-        
-        except Exception as e:
-            print(f"[MQTT] Error processing message: {e}")
-
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"go2_nav_{robot_id}")
-    client.on_connect = on_connect
-    client.on_message = on_message
-    
-    try:
-        client.connect(broker_host, broker_port, 60)
-        print(f"[MQTT] Connecting to {broker_host}:{broker_port}...")
-        client.loop_forever()
-    except Exception as e:
-        print(f"[MQTT] Connection error: {e}")
+    elif cmd == "standup":
+        print(f"standup result={connection.standup()}")
+    elif cmd == "liedown":
+        print(f"liedown result={connection.liedown()}")
 
 
 def _dispatch_command(
@@ -239,125 +270,182 @@ def _dispatch_command(
     cmd = parts[0].lower()
     if cmd in {"quit", "exit"}:
         return False
-
     if cmd == "help":
         _print_help()
-        return True
-
-    if cmd == "goal":
+    elif cmd == "goal":
         _handle_goal_command(parts, navigator)
-        return True
-
-    if cmd == "explore":
+    elif cmd == "explore":
         _handle_explore_command(parts, explorer)
-        return True
-
-    if cmd in {"recovery", "standup", "liedown"}:
+    elif cmd in {"recovery", "standup", "liedown"}:
         _handle_robot_command(parts, connection)
-        return True
-
-    if cmd == "state":
+    elif cmd == "state":
         print(f"planner state={navigator.get_state()}")
         print(f"goal reached={navigator.is_goal_reached()}")
-        return True
-
-    if cmd == "cancel":
+    elif cmd == "cancel":
         print(f"cancelled={navigator.cancel_goal()}")
-        return True
-
-    print(f"unknown command: {cmd}")
-    _print_help()
+    else:
+        print(f"unknown command: {cmd}")
+        _print_help()
     return True
 
 
+# =============================================================================
+# Argument parser
+# =============================================================================
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Headless Go2 navigation — terminal REPL or MQTT mode"
+    )
+    parser.add_argument("--robot-ip", required=True, help="Unitree Go2 IP address")
+    # Map
+    parser.add_argument(
+        "--map-file", type=str, default=None,
+        help="Path to nav2-format YAML map file (enables static global map)",
+    )
+    # Planner
+    parser.add_argument("--n-dask-workers", type=int, default=6)
+    parser.add_argument("--planner-robot-speed", type=float, default=None)
+    parser.add_argument("--navigation-voxel-size", type=float, default=0.2)
+    parser.add_argument("--goal-timeout", type=float, default=15.0)
+    parser.add_argument("--voxel-device", default="CUDA:0")
+    # Robot
+    parser.add_argument("--skip-recovery", action="store_true",
+                        help="Skip recovery stand on startup")
+    # MQTT (optional — enables MQTT mode)
+    parser.add_argument("--mqtt-broker", type=str, default=None,
+                        help="MQTT broker host (enables MQTT mode, overrides terminal REPL)")
+    parser.add_argument("--mqtt-port", type=int, default=1883)
+    parser.add_argument("--robot-id", type=str, default="go2_02")
+    # Viewer
+    parser.add_argument("--viewer", type=str, default="none",
+                        choices=["none", "rerun", "rerun-web", "foxglove"],
+                        help="Viewer backend (default: none)")
+    parser.add_argument("--viewer-port", type=int, default=7779,
+                        help="WebSocket vis port (default: 7779)")
+    return parser
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
 def main() -> None:
     args = _build_parser().parse_args()
-
     voxel_device = _resolve_voxel_device(args.voxel_device)
 
-    # Same stack as `dimos run unitree-go2`, but headless (no UI module).
+    print("=" * 60)
+    print("Go2 dimos Navigation (headless)")
+    print("=" * 60)
+    print(f"Robot IP:        {args.robot_ip}")
+    print(f"Robot ID:        {args.robot_id}")
+    print(f"Voxel size:      {args.navigation_voxel_size}m  device={voxel_device}")
+    print(f"Static map:      {args.map_file or 'None (LiDAR-only mode)'}")
+    if args.mqtt_broker:
+        print(f"Mode:            MQTT  ({args.mqtt_broker}:{args.mqtt_port})")
+    else:
+        print("Mode:            Terminal REPL")
+    print("=" * 60)
+
+    # Build global config
+    global_config_kwargs: dict[str, Any] = dict(
+        robot_ip=args.robot_ip,
+        viewer_backend="rerun-web",
+        n_dask_workers=args.n_dask_workers,
+        planner_robot_speed=args.planner_robot_speed,
+        robot_model="unitree_go2",
+    )
+    if args.map_file:
+        global_config_kwargs["mujoco_global_costmap_from_occupancy"] = args.map_file
+    global_config_kwargs["viewer_backend"] = args.viewer
+
     blueprint = autoconnect(
         go2_connection(),
         voxel_mapper(voxel_size=args.navigation_voxel_size, device=voxel_device),
         cost_mapper(),
         replanning_a_star_planner(),
         wavefront_frontier_explorer(goal_timeout=args.goal_timeout),
-    ).global_config(
-        robot_ip=args.robot_ip,
-        viewer_backend="none",
-        n_dask_workers=args.n_dask_workers,
-        planner_robot_speed=args.planner_robot_speed,
-        robot_model="unitree_go2",
-    )
+        websocket_vis(port=args.viewer_port),
+    ).global_config(**global_config_kwargs)
 
     pubsub.lcm.autoconf()  # type: ignore[attr-defined]
     coordinator = blueprint.build()
 
-    navigator = coordinator.get_instance(ReplanningAStarPlanner)
-    explorer = coordinator.get_instance(WavefrontFrontierExplorer)
+    navigator  = coordinator.get_instance(ReplanningAStarPlanner)
+    explorer   = coordinator.get_instance(WavefrontFrontierExplorer)
     connection = coordinator.get_instance(GO2Connection)
 
-    assert navigator is not None
-    assert explorer is not None
+    assert navigator  is not None
+    assert explorer   is not None
     assert connection is not None
 
-    print("Headless Go2 navigation is running.")
-    print(f"robot_ip={args.robot_ip}, voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}")
-    
-    # Start MQTT listener if broker is specified
-    mqtt_thread = None
-    if args.mqtt_broker:
-        if not MQTT_AVAILABLE:
-            print("[ERROR] MQTT requested but paho-mqtt is not installed.")
-            print("Install with: uv pip install paho-mqtt")
-            coordinator.stop()
-            return
-        
-        print(f"[MQTT] Starting MQTT listener for robot_id={args.robot_id}")
-        mqtt_thread = threading.Thread(
-            target=_mqtt_listener,
-            args=(args.mqtt_broker, args.mqtt_port, args.robot_id, navigator, explorer, connection),
-            daemon=True,
-            name="MQTTListener"
-        )
-        mqtt_thread.start()
-        print("[MQTT] MQTT listener started. Commands will be received from MQTT broker.")
-
-    # Run recovery stand to unlock robot after standup
+    # Recovery stand on startup
     if not args.skip_recovery:
-        print("\n[INFO] Running recovery stand to unlock robot after standup...")
+        print("\n[INFO] Running recovery stand...")
         try:
-            time.sleep(2.0)  # Wait for standup to complete
-            result = connection.publish_request(
-                RTC_TOPIC["SPORT_MOD"],
-                {"api_id": 1006}  # RecoveryStand
-            )
+            time.sleep(2.0)
+            result = connection.publish_request(RTC_TOPIC["SPORT_MOD"], {"api_id": 1006})
             print(f"[INFO] Recovery stand result: {result}")
             time.sleep(1.0)
         except Exception as e:
-            print(f"[WARN] Failed to run recovery stand: {e}")
-            print("[WARN] You may need to manually unlock the robot with the controller")
+            print(f"[WARN] Recovery stand failed: {e}")
 
-    _print_help()
+    # -------------------------------------------------------------------------
+    # MQTT mode
+    # -------------------------------------------------------------------------
+    if args.mqtt_broker:
+        if not MQTT_AVAILABLE:
+            print("[ERROR] paho-mqtt is not installed. Run: pip install paho-mqtt")
+            coordinator.stop()
+            sys.exit(1)
 
-    try:
-        while True:
-            raw = input("go2-nav> ").strip()
-            if not raw:
-                continue
+        mqtt_bridge = MQTTNavigationBridge(
+            args.mqtt_broker, args.mqtt_port, args.robot_id,
+            navigator, explorer, connection,
+        )
 
-            parts = raw.split()
-            if not _dispatch_command(parts, navigator, explorer, connection):
-                break
+        def _signal_handler(sig: int, frame: object) -> None:
+            print("\n[INFO] Shutting down...")
+            mqtt_bridge.stop()
+            coordinator.stop()
+            sys.exit(0)
 
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-    finally:
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+
+        mqtt_bridge.start()
+        print("[INFO] MQTT mode running. Waiting for commands... (Ctrl+C to stop)\n")
         try:
-            explorer.stop_exploration()
-        except Exception:
-            pass
-        coordinator.stop()
+            while mqtt_bridge.running:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            print("\n[INFO] Interrupted.")
+        finally:
+            mqtt_bridge.stop()
+            coordinator.stop()
+
+    # -------------------------------------------------------------------------
+    # Terminal REPL mode
+    # -------------------------------------------------------------------------
+    else:
+        print("[INFO] Navigation running. Type 'help' for commands.\n")
+        _print_help()
+        try:
+            while True:
+                raw = input("go2-nav> ").strip()
+                if not raw:
+                    continue
+                parts = raw.split()
+                if not _dispatch_command(parts, navigator, explorer, connection):
+                    break
+        except KeyboardInterrupt:
+            print("\nInterrupted.")
+        finally:
+            try:
+                explorer.stop_exploration()
+            except Exception:
+                pass
+            coordinator.stop()
 
 
 if __name__ == "__main__":

@@ -82,8 +82,16 @@ class CostMapper(Module):
         if self._global_config.mujoco_global_costmap_from_occupancy:
             if self._preloaded_costmap is None:
                 path = Path(self._global_config.mujoco_global_costmap_from_occupancy)
-                self._preloaded_costmap = OccupancyGrid.from_path(path)
-            return self._preloaded_costmap
+                try:
+                    self._preloaded_costmap = OccupancyGrid.from_path(path)
+                    logger.info(f"[CostMapper] Static map loaded from {path}, "
+                                f"shape={self._preloaded_costmap.grid.shape}, "
+                                f"resolution={self._preloaded_costmap.resolution}")
+                except Exception as e:
+                    logger.error(f"[CostMapper] Failed to load static map from {path}: {e}")
+                    # Fall through to LiDAR-based costmap
+            if self._preloaded_costmap is not None:
+                return self._preloaded_costmap
 
         fn = OCCUPANCY_ALGOS[self.config.algo]
         return fn(msg, **asdict(self.config.config))
