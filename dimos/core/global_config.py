@@ -28,6 +28,7 @@ def _get_all_numbers(s: str) -> list[float]:
 
 class GlobalConfig(BaseSettings):
     robot_ip: str | None = None
+    unitree_connection: Literal["webrtc", "replay", "mujoco", "ros"] | None = None
     simulation: bool = False
     replay: bool = False
     viewer_backend: ViewerBackend = "rerun-web"
@@ -62,6 +63,8 @@ class GlobalConfig(BaseSettings):
 
     @property
     def unitree_connection_type(self) -> str:
+        if self.unitree_connection is not None:
+            return self.unitree_connection
         if self.replay:
             return "replay"
         if self.simulation:

@@ -35,6 +35,7 @@ from dimos.msgs.geometry_msgs import (
 from dimos.msgs.sensor_msgs import CameraInfo, Image, PointCloud2
 from dimos.msgs.sensor_msgs.Image import ImageFormat
 from dimos.robot.unitree.connection import UnitreeWebRTCConnection
+from dimos.robot.unitree.go2.ros_sim_connection import ROSSimConnection
 from dimos.utils.data import get_data
 from dimos.utils.decorators.decorators import simple_mcache
 from dimos.utils.testing.replay import TimedSensorReplay, TimedSensorStorage
@@ -173,6 +174,16 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     ) -> None:
         self._global_config = cfg
 
+        ros_env_namespace = kwargs.pop("ros_env_namespace", None)
+        ros_robot_namespace = kwargs.pop("ros_robot_namespace", None)
+        ros_pointcloud_topic = kwargs.pop("ros_pointcloud_topic", None)
+        if ros_pointcloud_topic is None:
+            # Backward compatibility with older keyword argument.
+            ros_pointcloud_topic = kwargs.pop("ros_lidar_topic", None)
+        ros_odom_topic = kwargs.pop("ros_odom_topic", None)
+        ros_image_topic = kwargs.pop("ros_image_topic", None)
+        ros_cmd_vel_topic = kwargs.pop("ros_cmd_vel_topic", None)
+
         ip = ip if ip is not None else self._global_config.robot_ip
 
         connection_type = self._global_config.unitree_connection_type
@@ -183,11 +194,26 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             from dimos.robot.unitree.mujoco_connection import MujocoConnection
 
             self.connection = MujocoConnection(self._global_config)
+        elif ip in ["ros", "ros2"] or connection_type == "ros":
+            ros_connection_kwargs: dict[str, str] = {}
+            if ros_env_namespace is not None:
+                ros_connection_kwargs["ros_env_namespace"] = ros_env_namespace
+            if ros_robot_namespace is not None:
+                ros_connection_kwargs["ros_robot_namespace"] = ros_robot_namespace
+            if ros_pointcloud_topic is not None:
+                ros_connection_kwargs["lidar_topic"] = ros_pointcloud_topic
+            if ros_odom_topic is not None:
+                ros_connection_kwargs["odom_topic"] = ros_odom_topic
+            if ros_image_topic is not None:
+                ros_connection_kwargs["image_topic"] = ros_image_topic
+            if ros_cmd_vel_topic is not None:
+                ros_connection_kwargs["cmd_vel_topic"] = ros_cmd_vel_topic
+            self.connection = ROSSimConnection(**ros_connection_kwargs)
         else:
             assert ip is not None, "IP address must be provided"
             self.connection = UnitreeWebRTCConnection(ip)
 
-        Module.__init__(self, *args, **kwargs)
+        Module.__init__(self, *args, **kwargs) 
 
     @rpc
     def record(self, recording_name: str) -> None:
