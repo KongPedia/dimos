@@ -14,7 +14,6 @@
 # limitations under the License.
 
 from dimos.core.blueprints import autoconnect
-from dimos.core.global_config import global_config
 from dimos.core.transport import ROSTransport
 from dimos.msgs.geometry_msgs import Twist
 from dimos.msgs.sensor_msgs import CameraInfo, PointCloud2
@@ -25,17 +24,21 @@ from dimos.perception.detection.detectors.person.yolo import YoloPersonDetector
 from dimos.perception.detection.module2D import Detection2DModule
 from dimos.robot.unitree.go2.battlebang_webrtc_bridge import battlebang_webrtc_bridge
 from dimos.robot.unitree.go2.blueprints.smart.unitree_go2 import unitree_go2
-from dimos.robot.unitree.go2.connection import GO2Connection
+from dimos.robot.unitree.go2.connection import GO2Connection, go2_connection
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule
 
 
-def _robot_ns_topic(path: str) -> str:
-    """Build a ROS topic under ros_robot_namespace (e.g. /robot0/point_cloud2)."""
+def _robot_ns_topic(path: str, ros_robot_namespace: str) -> str:
+    """Build a ROS topic under robot namespace (e.g. /robot0/point_cloud2)."""
     base = path if path.startswith("/") else f"/{path}"
-    ns = (global_config.ros_robot_namespace or "").strip("/")
+    ns = ros_robot_namespace.strip("/")
     if not ns:
         return base
     return f"/{ns}{base}"
+
+
+_GO2_ROS_KWARGS = {"ros_robot_namespace": "robot0"}
+_ROS_ROBOT_NAMESPACE = _GO2_ROS_KWARGS["ros_robot_namespace"]
 
 
 # Battlebang compatibility blueprint:
@@ -44,8 +47,9 @@ def _robot_ns_topic(path: str) -> str:
 unitree_go2_battlebang_bridge = (
     autoconnect(
         unitree_go2,
+        go2_connection(**_GO2_ROS_KWARGS),
         battlebang_webrtc_bridge(
-            webrtc_req_topic=_robot_ns_topic("webrtc_req"),
+            webrtc_req_topic=_robot_ns_topic("webrtc_req", _ROS_ROBOT_NAMESPACE),
         ),
         Detection2DModule.blueprint(
             detector=YoloPersonDetector,
@@ -66,20 +70,26 @@ unitree_go2_battlebang_bridge = (
     .transports(
         {
             # Internal DimOS movement output -> battlebang twist_mux input.
-            ("cmd_vel_dimos", Twist): ROSTransport(_robot_ns_topic("cmd_vel_dimos"), Twist),
+            ("cmd_vel_dimos", Twist): ROSTransport(
+                _robot_ns_topic("cmd_vel_dimos", _ROS_ROBOT_NAMESPACE), Twist
+            ),
             # battlebang twist_mux output -> DimOS GO2 move input.
-            ("cmd_vel_out", Twist): ROSTransport(_robot_ns_topic("cmd_vel_out"), Twist),
+            ("cmd_vel_out", Twist): ROSTransport(
+                _robot_ns_topic("cmd_vel_out", _ROS_ROBOT_NAMESPACE), Twist
+            ),
             # Feed battlebang PerceptionNode with lightweight detections.
             ("detections", Detection2DArray): ROSTransport(
-                _robot_ns_topic("detected_persons"), Detection2DArray
+                _robot_ns_topic("detected_persons", _ROS_ROBOT_NAMESPACE), Detection2DArray
             ),
             # Feed battlebang PerceptionNode with point cloud and camera intrinsics.
-            ("lidar", PointCloud2): ROSTransport(_robot_ns_topic("point_cloud2"), PointCloud2),
+            ("lidar", PointCloud2): ROSTransport(
+                _robot_ns_topic("point_cloud2", _ROS_ROBOT_NAMESPACE), PointCloud2
+            ),
             ("camera_info", CameraInfo): ROSTransport(
-                _robot_ns_topic("camera/camera_info"), CameraInfo
+                _robot_ns_topic("camera/camera_info", _ROS_ROBOT_NAMESPACE), CameraInfo
             ),
             # Publish DimOS TF into ROS tf2 buffer for cloud->camera transforms.
-            ("tf_msg", TFMessage): ROSTransport(_robot_ns_topic("tf"), TFMessage),
+            ("tf_msg", TFMessage): ROSTransport(_robot_ns_topic("tf", _ROS_ROBOT_NAMESPACE), TFMessage),
         }
     )
 )

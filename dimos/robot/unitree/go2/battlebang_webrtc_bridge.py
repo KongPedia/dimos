@@ -62,27 +62,40 @@ class BattlebangWebrtcBridge(Module):
         super().start()
 
         webrtc_req_type = self._resolve_webrtc_req_type()
-        if webrtc_req_type is None:
-            raise ImportError(
-                "go2_interfaces.msg.WebRtcReq is required for BattlebangWebrtcBridge"
+        self._unsubs = []
+        self._publish_request_rpc = None
+        self._move_rpc = None
+
+        subscribe_webrtc = webrtc_req_type is not None
+        subscribe_cmd_vel = bool(self.config.cmd_vel_topic)
+
+        if not subscribe_webrtc:
+            logger.warning(
+                "[BattlebangWebrtcBridge] go2_interfaces.msg.WebRtcReq not found; "
+                "skipping webrtc request bridge"
             )
 
-        self._publish_request_rpc = self.get_rpc_calls("GO2Connection.publish_request")
-        self._move_rpc = self.get_rpc_calls("GO2Connection.move")
+        if not subscribe_webrtc and not subscribe_cmd_vel:
+            logger.warning(
+                "[BattlebangWebrtcBridge] no active ROS subscriptions configured; bridge is idle"
+            )
+            return
 
         self._ros = RawROS(node_name=self.config.ros_node_name)
         self._ros.start()
-        self._unsubs = []
 
-        self._unsubs.append(
-            self._ros.subscribe(
-                RawROSTopic(self.config.webrtc_req_topic, webrtc_req_type),
-                self._on_webrtc_req_raw,
+        if subscribe_webrtc and webrtc_req_type is not None:
+            self._publish_request_rpc = self.get_rpc_calls("GO2Connection.publish_request")
+            self._unsubs.append(
+                self._ros.subscribe(
+                    RawROSTopic(self.config.webrtc_req_topic, webrtc_req_type),
+                    self._on_webrtc_req_raw,
+                )
             )
-        )
-        logger.info(f"[BattlebangWebrtcBridge] subscribed to {self.config.webrtc_req_topic}")
+            logger.info(f"[BattlebangWebrtcBridge] subscribed to {self.config.webrtc_req_topic}")
 
-        if self.config.cmd_vel_topic:
+        if subscribe_cmd_vel:
+            self._move_rpc = self.get_rpc_calls("GO2Connection.move")
             ros_twist_type = derive_ros_type(Twist)
             self._unsubs.append(
                 self._ros.subscribe(
@@ -133,6 +146,9 @@ class BattlebangWebrtcBridge(Module):
             return parameter
 
     def _on_webrtc_req_raw(self, msg: Any, _topic: RawROSTopic) -> None:
+        if self._publish_request_rpc is None:
+            return
+
         topic = str(getattr(msg, "topic", "")).strip()
         if not topic:
             logger.warning("[BattlebangWebrtcBridge] dropping webrtc request: empty topic")
@@ -154,6 +170,9 @@ class BattlebangWebrtcBridge(Module):
             logger.error(f"[BattlebangWebrtcBridge] publish_request failed: {e}")
 
     def _on_cmd_vel_raw(self, msg: Any, _topic: RawROSTopic) -> None:
+        if self._move_rpc is None:
+            return
+
         try:
             twist = ros_to_dimos(msg, Twist)
             self._move_rpc(twist)
