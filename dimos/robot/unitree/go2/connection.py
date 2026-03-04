@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from threading import Thread
+from threading import Lock, Thread
 import time
 from typing import Any, Protocol
 
@@ -143,6 +143,8 @@ class ReplayConnection(UnitreeWebRTCConnection):
 
 class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     cmd_vel: In[Twist]
+    # [BattleBang local] Viewer set_pose → reset_origin, avoids pickle over RPC
+    origin_request: In[PoseStamped]
     pointcloud: Out[PointCloud2]
     odom: Out[PoseStamped]
     lidar: Out[PointCloud2]
@@ -154,6 +156,12 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     _global_config: GlobalConfig
     _camera_info_thread: Thread | None = None
     _latest_video_frame: Image | None = None
+
+    # [BattleBang local] Origin offset for map-frame alignment
+    # Set via reset_origin() to shift all published odom by a fixed amount
+    _origin_offset: PoseStamped | None = None  # subtract from raw odom
+    _pending_reset: bool = False               # capture next odom as origin
+    _origin_lock: Lock
 
     @classmethod
     def rerun_views(cls):  # type: ignore[no-untyped-def]
@@ -173,6 +181,9 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         **kwargs,
     ) -> None:
         self._global_config = cfg
+        self._origin_offset = None
+        self._pending_reset = False
+        self._origin_lock = Lock()
 
         ros_env_namespace = kwargs.pop("ros_env_namespace", None)
         ros_robot_namespace = kwargs.pop("ros_robot_namespace", None)
@@ -240,6 +251,8 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         self._disposables.add(self.connection.odom_stream().subscribe(self._publish_tf))
         self._disposables.add(self.connection.video_stream().subscribe(onimage))
         self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))
+        # [BattleBang local] Viewer 📍 Set Pose → reset_origin via LCM (avoids pickle)
+        self._disposables.add(Disposable(self.origin_request.subscribe(self._on_origin_request)))
 
         self._camera_info_thread = Thread(
             target=self.publish_camera_info,
@@ -286,11 +299,121 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             camera_optical,
         ]
 
+    def _apply_origin_offset(self, msg: PoseStamped) -> PoseStamped:
+        """[BattleBang local] Apply the origin offset to a raw odom pose.
+
+        If _pending_reset is True, the current msg becomes the new origin (0, 0).
+        If _origin_offset is set, subtract it so the published pose is relative.
+        """
+        with self._origin_lock:
+            if self._pending_reset:
+                self._origin_offset = msg
+                self._pending_reset = False
+                logger.info(
+                    f"[origin] Reset: raw odom ({msg.x:.3f}, {msg.y:.3f}) is now (0, 0)"
+                )
+
+            if self._origin_offset is None:
+                return msg
+
+            # Compute relative pose in the *origin* robot frame
+            # delta pos = global pos - origin pos, rotated into world
+            delta = msg - self._origin_offset  # uses Pose.__sub__
+            adjusted = PoseStamped(
+                frame_id=msg.frame_id,
+                ts=msg.ts,
+                position=delta.position,
+                orientation=delta.orientation,
+            )
+            return adjusted
+
+    @rpc
+    def reset_origin(
+        self,
+        x: float | None = None,
+        y: float | None = None,
+        yaw_deg: float | None = None,
+    ) -> None:
+        """[BattleBang local] Set the map-frame origin for odom publishing.
+
+        Call with no args to mark the *next* odom reading as (0, 0).
+        Call with x/y/yaw_deg to set a specific map-frame offset:
+          - The robot's current raw odom position will be reported as (x, y, yaw)
+          - i.e., origin_offset = raw_odom - (x, y, yaw)
+        
+        Args:
+            x: Desired map-frame X position of current robot location (m)
+            y: Desired map-frame Y position of current robot location (m)
+            yaw_deg: Desired map-frame yaw of current robot location (deg)
+        """
+        with self._origin_lock:
+            if x is None and y is None:
+                # Capture next odom as the new origin
+                self._pending_reset = True
+                self._origin_offset = None
+                logger.info("[origin] Will reset on next odom message")
+            else:
+                # Will be resolved on next odom tick: store a "virtual" offset
+                # We store sentinel values; actual subtraction happens in _apply_origin_offset
+                # when the next odom arrives.
+                # For now just store desired map-frame position as the pending "where am I" marker.
+                self._pending_reset = False
+                # Store desired map position; resolved against raw odom on next tick
+                self._desired_map_pose = PoseStamped(
+                    frame_id="world",
+                    position=(x or 0.0, y or 0.0, 0.0),
+                    orientation=Quaternion.from_euler(Vector3(0.0, 0.0, float(yaw_deg or 0.0) * 3.14159265 / 180.0)),
+                )
+                self._pending_map_pose = True
+                logger.info(f"[origin] Will set map pose to ({x}, {y}, yaw={yaw_deg}deg) on next odom")
+
+    def _on_origin_request(self, msg: PoseStamped) -> None:
+        """[BattleBang local] LCM handler for viewer 📍 Set Pose → reset_origin.
+
+        WebsocketVisModule publishes a PoseStamped to origin_request when the user
+        clicks 'Set Pose' in the browser. This avoids RPC+pickle issues.
+        """
+        import math as _math
+        x = float(msg.x)
+        y = float(msg.y)
+        # Extract yaw from quaternion
+        q = msg.orientation
+        yaw_rad = _math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+        )
+        yaw_deg = _math.degrees(yaw_rad)
+        logger.info(f"[origin] origin_request received: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}deg)")
+        self.reset_origin(x=x, y=y, yaw_deg=yaw_deg)
+
+
     def _publish_tf(self, msg: PoseStamped) -> None:
-        transforms = self._odom_to_tf(msg)
+        # [BattleBang local] Resolve pending map-pose-based offset
+        with self._origin_lock:
+            if getattr(self, "_pending_map_pose", False):
+                desired = self._desired_map_pose
+                # origin_offset = raw_odom - desired_map_pose
+                # so that: raw_odom - origin_offset = desired_map_pose
+                offset_pos = msg.position - desired.position
+                offset_ori = msg.orientation * desired.orientation.inverse()
+                self._origin_offset = PoseStamped(
+                    frame_id="world",
+                    position=offset_pos,
+                    orientation=offset_ori,
+                )
+                self._pending_map_pose = False
+                logger.info(
+                    f"[origin] Map pose set: raw ({msg.x:.3f}, {msg.y:.3f}) "
+                    f"→ map ({desired.x:.3f}, {desired.y:.3f})"
+                )
+
+        adjusted = self._apply_origin_offset(msg)
+        # [BattleBang local] Keep latest map-frame pose for MQTT pose broadcaster
+        self._latest_adjusted_odom = adjusted
+        transforms = self._odom_to_tf(adjusted)
         self.tf.publish(*transforms)
         if self.odom.transport:
-            self.odom.publish(msg)
+            self.odom.publish(adjusted)
 
     def publish_camera_info(self) -> None:
         while True:

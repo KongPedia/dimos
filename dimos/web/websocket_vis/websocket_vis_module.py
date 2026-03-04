@@ -94,6 +94,8 @@ class WebsocketVisModule(Module):
     stop_explore_cmd: Out[Bool]
     cmd_vel: Out[Twist]
     movecmd_stamped: Out[TwistStamped]
+    # [BattleBang local] Viewer 📍 Set Pose → GO2Connection.reset_origin via LCM
+    origin_request: Out[PoseStamped]
 
     def __init__(
         self,
@@ -221,6 +223,7 @@ class WebsocketVisModule(Module):
         self.vis_state["gps_travel_goal_points"] = json_points
         self._emit("gps_travel_goal_points", json_points)
 
+
     def _create_server(self) -> None:
         # Create SocketIO server
         self.sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
@@ -312,6 +315,32 @@ class WebsocketVisModule(Module):
         async def stop_explore(sid) -> None:  # type: ignore[no-untyped-def]
             logger.info("Stopping exploration")
             self.stop_explore_cmd.publish(Bool(data=True))
+
+        @self.sio.event  # type: ignore[untyped-decorator]
+        async def set_pose(sid: str, data: dict[str, Any]) -> None:
+            """[BattleBang local] RViz-style 2D Pose Estimate from viewer click.
+
+            Publishes PoseStamped to origin_request LCM topic.
+            GO2Connection subscribes and calls reset_origin() internally.
+            Payload: { x: float, y: float, yaw_deg?: float }
+            """
+            import math as _math
+            x = float(data.get("x", 0.0))
+            y = float(data.get("y", 0.0))
+            yaw_deg = float(data.get("yaw_deg", 0.0))
+            yaw_rad = _math.radians(yaw_deg)
+            logger.info(f"[pose] Viewer set_pose: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}deg)")
+            try:
+                from dimos.msgs.geometry_msgs import Quaternion as _Q, Vector3 as _V3
+                pose = PoseStamped(
+                    frame_id="world",
+                    position=(x, y, 0.0),
+                    orientation=_Q.from_euler(_V3(0.0, 0.0, yaw_rad)),
+                )
+                self.origin_request.publish(pose)
+            except Exception as e:
+                logger.error(f"[pose] origin_request publish error: {e}")
+
 
         @self.sio.event  # type: ignore[untyped-decorator]
         async def clear_gps_goals(sid: str) -> None:
