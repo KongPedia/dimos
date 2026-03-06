@@ -25,8 +25,6 @@ from dimos_lcm.sensor_msgs.PointCloud2 import (
 from dimos_lcm.sensor_msgs.PointField import PointField  # type: ignore[import-untyped]
 from dimos_lcm.std_msgs.Header import Header  # type: ignore[import-untyped]
 import numpy as np
-import open3d as o3d  # type: ignore[import-untyped]
-import open3d.core as o3c  # type: ignore[import-untyped]
 
 from dimos.msgs.geometry_msgs import Transform, Vector3
 from dimos.types.timestamped import Timestamped
@@ -36,6 +34,28 @@ if TYPE_CHECKING:
 
     from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
     from dimos.msgs.sensor_msgs.Image import Image
+
+if TYPE_CHECKING:
+    import open3d as o3d
+    import open3d.core as o3c
+else:
+
+    class _LazyO3D:
+        def __getattr__(self, name):
+            import open3d as o3d_module
+
+            globals()["o3d"] = o3d_module
+            return getattr(o3d_module, name)
+
+    class _LazyO3C:
+        def __getattr__(self, name):
+            import open3d.core as o3c_module
+
+            globals()["o3c"] = o3c_module
+            return getattr(o3c_module, name)
+
+    o3d = _LazyO3D()
+    o3c = _LazyO3C()
 
 
 @functools.lru_cache(maxsize=16)

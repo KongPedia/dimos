@@ -82,6 +82,14 @@ def patchdask(dask_client: DimosCluster, local_cluster: LocalCluster) -> DimosCl
     ) -> ModuleProxy:
         from dimos.core.docker_runner import DockerModule, is_docker_module
 
+        # Check if this module should run locally in the main process (useful for lightweight modules)
+        if kwargs.pop("run_locally", False):
+            logger.info("Deploying module locally (thread).", module=actor_class.__name__)
+            actor = actor_class(*args, **kwargs)
+            worker = "local"
+            ActorRegistry.update(str(actor), str(worker))
+            return cast("ModuleProxy", RPCClient(actor, actor_class))
+
         # Check if this module should run in Docker (based on its default_config)
         if is_docker_module(actor_class):
             logger.info("Deploying module in Docker.", module=actor_class.__name__)
