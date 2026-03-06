@@ -15,14 +15,13 @@
 """Shared memory registry for tracking actor deployments across processes."""
 
 import json
-import os
 from multiprocessing import shared_memory
 
 
 class ActorRegistry:
     """Shared memory registry of actor deployments."""
 
-    SHM_NAME = f"dimos_actor_registry_{os.getuid()}"
+    SHM_NAME = "dimos_actor_registry"
     SHM_SIZE = 65536  # 64KB should be enough for most deployments
 
     @staticmethod

@@ -33,8 +33,9 @@ dependencies = [
     "dimos-lcm",
     "PyTurboJPEG==1.8.2",
     # Core
-    "numpy>=1.26.4,<2.0.0",
+    "numpy>=1.26.4",
     "scipy>=1.15.1",
+    "pin>=3.3.0",  # Pinocchio IK library
     "reactivex",
     "asyncio==3.4.3",
     "sortedcontainers==2.4.0",
@@ -51,6 +52,8 @@ dependencies = [
     "colorlog==6.9.0",
     # Core Msgs
     "opencv-python",
+    "open3d-unofficial-arm; platform_system == 'Linux' and platform_machine == 'aarch64'",
+    "open3d>=0.18.0; platform_system != 'Linux' or platform_machine != 'aarch64'",
     # CLI
     "pydantic-settings>=2.11.0,<3",
     "textual==3.7.1",
@@ -166,31 +169,8 @@ unitree = [
     "dimos[base]",
     "unitree-webrtc-connect-leshy>=2.0.7"
 ]
-perception-jetson-jetpack = [
-    "ultralytics>=8.3.70",
-    "filterpy>=1.4.5",
-    "Pillow",
-    "lap>=0.5.12",
-    "transformers==4.49.0",
-    "moondream",
-    "omegaconf>=2.3.0",
-    "hydra-core>=1.3.0",
-    "pycuda>=2026.1",
-]
-
-jetson-jetpack6 = [
-    # Jetson Jetpack 6 (JetPack 6 / CUDA 12.x) 용 extras
-    # torch, ultralytics, onnxruntime, open3d 는 Docker 베이스 이미지에 이미 설치되어 있으므로 제외
-    "dimos[agents,perception-jetson-jetpack]",
-
-    # Unitree
-    "unitree-webrtc-connect-leshy>=2.0.7",
-]
 
 manipulation = [
-    # IK (Pinocchio)
-    "pin>=3.3.0",
-
     # Planning (Drake)
     "drake==1.45.0; sys_platform == 'darwin' and platform_machine != 'aarch64'",
     "drake>=1.40.0; sys_platform != 'darwin' and platform_machine != 'aarch64'",
@@ -430,15 +410,6 @@ env = [
 addopts = "-v -s -p no:warnings -ra --color=yes -m 'not (vis or exclude or tool or lcm or ros or heavy or gpu or module or e2e or integration or neverending or mujoco)'"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-
-[tool.uv]
-# Jetson (aarch64): chromadb → block onnxruntime(CPU) transitive dependency.
-# Docker base image's onnxruntime-gpu is overwritten.
-# x86_64 environment works the same as before.
-# Usage: uv sync --extra jetson-jetpack6
-override-dependencies = [
-    "onnxruntime>=1.14.1; platform_machine != 'aarch64'",
-]
 
 [tool.largefiles]
 max_size_kb = 50

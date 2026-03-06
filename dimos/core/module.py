@@ -96,7 +96,6 @@ class ModuleConfig:
     tf_transport: type[TFSpec] = LCMTF
     frame_id_prefix: str | None = None
     frame_id: str | None = None
-    run_locally: bool = False
 
 
 ModuleConfigT = TypeVarExtension("ModuleConfigT", bound=ModuleConfig, default=ModuleConfig)
@@ -458,16 +457,11 @@ class Module(ModuleBase[ModuleConfigT]):
                 setattr(self, name, stream)
         super().__init__(*args, **kwargs)
 
-    def set_ref(self, ref) -> str:  # type: ignore[no-untyped-def]
-        try:
-            worker = get_worker()
-            self.worker = worker.name
-            worker_name_ret = worker.name
-        except ValueError:
-            self.worker = "local"
-            worker_name_ret = "local"
+    def set_ref(self, ref) -> int:  # type: ignore[no-untyped-def]
+        worker = get_worker()
         self.ref = ref
-        return worker_name_ret  # type: ignore[no-any-return]
+        self.worker = worker.name
+        return worker.name  # type: ignore[no-any-return]
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}"
