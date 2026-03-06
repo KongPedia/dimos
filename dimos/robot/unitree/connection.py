@@ -50,7 +50,6 @@ VideoMessage: TypeAlias = NDArray[np.uint8]  # Shape: (height, width, 3)
 @dataclass
 class SerializableVideoFrame:
     """Pickleable wrapper for av.VideoFrame with all metadata"""
-
     data: np.ndarray  # type: ignore[type-arg]
     pts: int | None = None
     time: float | None = None
@@ -82,7 +81,51 @@ class UnitreeWebRTCConnection(Resource):
         self.stop_timer: threading.Timer | None = None
         self.cmd_vel_timeout = 0.2
         self.conn = LegionConnection(WebRTCConnectionMethod.LocalSTA, ip=self.ip)
+        self.last_map_pose = self._load_initial_pose()
+        self.computed_init_tf = None
         self.connect()
+
+    def _load_initial_pose(self) -> Any:
+        import json
+        import math
+        import os
+
+        from dimos.msgs.geometry_msgs.Quaternion import Quaternion
+        from dimos.msgs.geometry_msgs.Transform import Transform
+        from dimos.msgs.geometry_msgs.Vector3 import Vector3
+        path = "/workspace/battlebang/data/last_pose.json"
+        if not os.path.exists(path):
+            path = "/home/konglabs2/battlebang/data/last_pose.json"
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                pos = Vector3(float(data.get("x", 0.0)), float(data.get("y", 0.0)), float(data.get("z", 0.0)))
+                ori = data.get("orientation", {})
+                quat = Quaternion(
+                    float(ori.get("x", 0.0)),
+                    float(ori.get("y", 0.0)),
+                    float(ori.get("z", 0.0)),
+                    float(ori.get("w", 1.0))
+                )
+                print(f"Loaded init_pose from {path}: {pos}, {quat}")
+                return Transform(translation=pos, rotation=quat, frame_id="map", child_frame_id="base_link")
+            except Exception as e:
+                print(f"Failed to load init pose from {path}: {e}")
+
+        # Fallback to environment variables
+        try:
+            init_x = float(os.getenv("AMCL_INIT_X", "9.556"))
+            init_y = float(os.getenv("AMCL_INIT_Y", "2.784"))
+            init_yaw = float(os.getenv("AMCL_INIT_YAW", "-1.578"))
+
+            pos = Vector3(init_x, init_y, 0.0)
+            quat = Quaternion(0.0, 0.0, math.sin(init_yaw / 2.0), math.cos(init_yaw / 2.0))
+            print(f"Loaded init_pose from environment variables: {pos}, {quat}")
+            return Transform(translation=pos, rotation=quat, frame_id="map", child_frame_id="base_link")
+        except Exception as e:
+            print(f"Failed to load init pose from env: {e}")
+        return None
 
     def connect(self) -> None:
         self.loop = asyncio.new_event_loop()
@@ -243,7 +286,14 @@ class UnitreeWebRTCConnection(Resource):
 
     @simple_mcache
     def lidar_stream(self) -> Observable[PointCloud2]:
-        return backpressure(self.raw_lidar_stream().pipe(ops.map(pointcloud2_from_webrtc_lidar)))
+        def apply_init_pose(pc: PointCloud2) -> PointCloud2:
+            if getattr(self, "computed_init_tf", None) is not None:
+                return pc.transform(self.computed_init_tf)
+            return pc
+        return backpressure(self.raw_lidar_stream().pipe(
+            ops.map(pointcloud2_from_webrtc_lidar),
+            ops.map(apply_init_pose)
+        ))
 
     @simple_mcache
     def tf_stream(self) -> Observable[Transform]:
@@ -252,7 +302,32 @@ class UnitreeWebRTCConnection(Resource):
 
     @simple_mcache
     def odom_stream(self) -> Observable[Pose]:
-        return backpressure(self.raw_odom_stream().pipe(ops.map(Odometry.from_msg)))
+        def apply_init_pose(odom: Odometry) -> Odometry:
+            from dimos.msgs.geometry_msgs.Transform import Transform
+            odom_tf = Transform(
+                translation=odom.position,
+                rotation=odom.orientation,
+                frame_id="odom_start",
+                child_frame_id="base_link"
+            )
+            # Compute inverse anchor on very first odom message
+            if getattr(self, "last_map_pose", None) is not None and getattr(self, "computed_init_tf", None) is None:
+                self.computed_init_tf = self.last_map_pose + odom_tf.inverse()
+
+                print(f"[DIMOS ODOM CALC] First raw odom received: {odom_tf.translation}. Anchor inverse computation -> map -> odom_start anchored at: {self.computed_init_tf.translation}")
+
+            if getattr(self, "computed_init_tf", None) is not None:
+                combined = self.computed_init_tf + odom_tf
+                odom.position = combined.translation
+                odom.orientation = combined.rotation
+                odom.frame_id = "map"
+
+            return odom
+
+        return backpressure(self.raw_odom_stream().pipe(
+            ops.map(Odometry.from_msg),
+            ops.map(apply_init_pose)
+        ))
 
     @simple_mcache
     def video_stream(self) -> Observable[Image]:
@@ -316,7 +391,7 @@ class UnitreeWebRTCConnection(Resource):
                 subject.on_next(serializable_frame)
 
         self.conn.video.add_track_callback(accept_track)
-
+        
         # Run the video channel switching in the background thread
         def switch_video_channel() -> None:
             self.conn.video.switchVideoChannel(True)

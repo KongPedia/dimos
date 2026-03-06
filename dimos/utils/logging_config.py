@@ -54,7 +54,12 @@ def _get_log_directory() -> Path:
 
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
+        # Test write access by creating a temporary file
+        test_file = log_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink()
     except (PermissionError, OSError):
+        # Fallback to temp directory if primary location is read-only
         log_dir = Path(tempfile.gettempdir()) / "dimos" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
 
