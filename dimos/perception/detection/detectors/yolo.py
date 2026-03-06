@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from ultralytics import YOLO  # type: ignore[attr-defined, import-not-found]
+
 from dimos.msgs.sensor_msgs import Image
 from dimos.perception.detection.detectors.types import Detector
 from dimos.perception.detection.type import ImageDetections2D
@@ -28,12 +30,7 @@ class Yolo2DDetector(Detector):
         model_path: str = "models_yolo",
         model_name: str = "yolo11n.pt",
         device: str | None = None,
-        imgsz: int = 640,
     ) -> None:
-        from ultralytics import YOLO
-
-        self.imgsz = imgsz
-
         self.model = YOLO(
             get_data(model_path) / model_name,
             task="detect",
@@ -63,7 +60,6 @@ class Yolo2DDetector(Detector):
         results = self.model.track(
             source=image.to_opencv(),
             device=self.device,
-            imgsz=self.imgsz,
             conf=0.5,
             iou=0.6,
             persist=True,
