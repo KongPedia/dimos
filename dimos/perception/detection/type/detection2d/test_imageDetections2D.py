@@ -13,6 +13,7 @@
 # limitations under the License.
 import pytest
 
+from dimos.perception.detection.type.detection2d.bbox import Detection2DBBox
 from dimos.perception.detection.type import ImageDetections2D
 
 
@@ -50,3 +51,18 @@ def test_from_ros_detection2d_array(get_moment_2d) -> None:
     print(f"  Recovered bbox: {recovered_det.bbox}")
     print(f"  Track ID: {recovered_det.track_id}")
     print(f"  Confidence: {recovered_det.confidence:.3f}")
+
+
+def test_ros_class_id_format_roundtrip(get_moment_2d) -> None:
+    moment = get_moment_2d()
+    detections2d = moment["detections2d"]
+    original_det = detections2d.detections[0]
+
+    ros_det = original_det.to_ros_detection2d()
+    ros_class_id = ros_det.results[0].hypothesis.class_id
+
+    assert ros_class_id == f"{original_det.class_id}:{original_det.name}"
+
+    recovered = Detection2DBBox.from_ros_detection2d(ros_det, image=detections2d.image)
+    assert recovered.class_id == original_det.class_id
+    assert recovered.name == original_det.name

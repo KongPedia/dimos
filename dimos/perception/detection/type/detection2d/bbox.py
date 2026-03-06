@@ -350,6 +350,21 @@ class Detection2DBBox(Detection2D):
             points_length=len(points),
         )
 
+    @staticmethod
+    def _encode_ros_class_id(class_id: int, name: str) -> str:
+        """Encode class identity for ROS vision_msgs/ObjectHypothesis.class_id."""
+        return f"{class_id}:{name}"
+
+    @staticmethod
+    def _decode_ros_class_id(class_id_raw: Any) -> tuple[int, str]:
+        """Decode ROS vision class_id string into numeric id and class name."""
+        class_id_token, _, name_token = str(class_id_raw).partition(":")
+        try:
+            class_id = int(class_id_token.strip())
+        except (TypeError, ValueError):
+            class_id = 0
+        return class_id, name_token.strip() or f"class_{class_id}"
+
     @classmethod
     def from_ros_detection2d(cls, ros_det: ROSDetection2D, **kwargs) -> Self:  # type: ignore[no-untyped-def]
         """Convert from ROS Detection2D message to Detection2D object."""
@@ -369,18 +384,22 @@ class Detection2DBBox(Detection2D):
         # Extract hypothesis info
         class_id = 0
         confidence = 0.0
+        decoded_name = ""
         if ros_det.results:
             hypothesis = ros_det.results[0].hypothesis
-            class_id = hypothesis.class_id
+            class_id, decoded_name = cls._decode_ros_class_id(hypothesis.class_id)
             confidence = hypothesis.score
 
         # Extract track_id
-        track_id = int(ros_det.id) if ros_det.id.isdigit() else 0
+        try:
+            track_id = int(str(ros_det.id))
+        except (TypeError, ValueError):
+            track_id = 0
 
         # Extract timestamp
         ts = to_timestamp(ros_det.header.stamp)
 
-        name = kwargs.pop("name", f"class_{class_id}")
+        name = kwargs.pop("name", decoded_name or f"class_{class_id}")
 
         return cls(
             bbox=bbox,
@@ -399,7 +418,7 @@ class Detection2DBBox(Detection2D):
             results=[
                 ObjectHypothesisWithPose(
                     ObjectHypothesis(
-                        class_id=self.class_id,
+                        class_id=self._encode_ros_class_id(self.class_id, self.name),
                         score=self.confidence,
                     )
                 )

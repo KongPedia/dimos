@@ -40,6 +40,7 @@ COMPLEX_TYPES: set[str] = {
     "sensor_msgs.Image",
     "sensor_msgs.CameraInfo",
     "geometry_msgs.PoseStamped",
+    "tf2_msgs.TFMessage",
 }
 
 # Cache for dynamic imports of dimos types
@@ -57,6 +58,18 @@ _ROS_TO_LCM_FIELD_MAP: dict[str, str] = {
 
 # Reverse mapping (LCM name -> ROS name)
 _LCM_TO_ROS_FIELD_MAP: dict[str, str] = {v: k for k, v in _ROS_TO_LCM_FIELD_MAP.items()}
+
+
+def _coerce_lcm_scalar_to_ros_type(value: Any, ros_type_hint: str) -> Any:
+    """Coerce scalar values to match ROS runtime field assertions.
+
+    ROS Python message setters perform strict runtime type checks. Some LCM-backed
+    messages can carry numerics in fields that ROS expects as strings (e.g.
+    vision_msgs/ObjectHypothesis.class_id). Coerce those primitive mismatches here.
+    """
+    if ros_type_hint == "string" and not isinstance(value, str):
+        return str(value)
+    return value
 
 
 def get_dimos_type(msg_name: str) -> type[DimosMsg] | None:
@@ -246,7 +259,12 @@ def _copy_lcm_to_ros_recursive(lcm_msg: Any, ros_msg: Any) -> None:
                 setattr(ros_msg, ros_field_name, bytes(lcm_value))
         else:
             # Primitive type - direct copy
-            setattr(ros_msg, ros_field_name, lcm_value)
+            ros_type_hint = field_types.get(ros_field_name, "")
+            setattr(
+                ros_msg,
+                ros_field_name,
+                _coerce_lcm_scalar_to_ros_type(lcm_value, ros_type_hint),
+            )
 
 
 def _create_lcm_instance_for_ros_msg(ros_msg: Any) -> Any:

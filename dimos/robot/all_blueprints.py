@@ -73,6 +73,7 @@ all_blueprints = {
     "unitree-go2-agentic-mcp": "dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_mcp:unitree_go2_agentic_mcp",
     "unitree-go2-agentic-ollama": "dimos.robot.unitree.go2.blueprints.agentic.unitree_go2_agentic_ollama:unitree_go2_agentic_ollama",
     "unitree-go2-basic": "dimos.robot.unitree.go2.blueprints.basic.unitree_go2_basic:unitree_go2_basic",
+    "unitree-go2-battlebang-bridge": "dimos.robot.unitree.go2.blueprints.smart.unitree_go2_battlebang_bridge:unitree_go2_battlebang_bridge",
     "unitree-go2-detection": "dimos.robot.unitree.go2.blueprints.smart.unitree_go2_detection:unitree_go2_detection",
     "unitree-go2-ros": "dimos.robot.unitree.go2.blueprints.smart.unitree_go2_ros:unitree_go2_ros",
     "unitree-go2-spatial": "dimos.robot.unitree.go2.blueprints.smart.unitree_go2_spatial:unitree_go2_spatial",
@@ -89,6 +90,7 @@ all_blueprints = {
 all_modules = {
     "agent": "dimos.agents.agent",
     "arm_teleop_module": "dimos.teleop.quest.quest_extensions",
+    "battlebang_webrtc_bridge": "dimos.robot.unitree.go2.battlebang_webrtc_bridge",
     "camera_module": "dimos.hardware.sensors.camera.module",
     "cartesian_motion_controller": "dimos.manipulation.control.servo_control.cartesian_motion_controller",
     "control_coordinator": "dimos.control.coordinator",
