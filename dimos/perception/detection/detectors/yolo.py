@@ -32,6 +32,8 @@ class Yolo2DDetector(Detector):
     ) -> None:
         from ultralytics import YOLO
 
+        self.imgsz = imgsz
+
         self.model = YOLO(
             get_data(model_path) / model_name,
             task="detect",
