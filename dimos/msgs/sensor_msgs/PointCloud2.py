@@ -25,8 +25,6 @@ from dimos_lcm.sensor_msgs.PointCloud2 import (
 from dimos_lcm.sensor_msgs.PointField import PointField  # type: ignore[import-untyped]
 from dimos_lcm.std_msgs.Header import Header  # type: ignore[import-untyped]
 import numpy as np
-import open3d as o3d  # type: ignore[import-untyped]
-import open3d.core as o3c  # type: ignore[import-untyped]
 
 from dimos.msgs.geometry_msgs import Transform, Vector3
 from dimos.types.timestamped import Timestamped
@@ -37,6 +35,13 @@ if TYPE_CHECKING:
     from dimos.msgs.sensor_msgs.CameraInfo import CameraInfo
     from dimos.msgs.sensor_msgs.Image import Image
 
+if TYPE_CHECKING:
+    import open3d as o3d
+    import open3d.core as o3c
+else:
+    import lazy_loader as lazy
+    o3d = lazy.load("open3d")
+    o3c = lazy.load("open3d.core")
 
 @functools.lru_cache(maxsize=16)
 def _get_matplotlib_cmap(name: str):  # type: ignore[no-untyped-def]
