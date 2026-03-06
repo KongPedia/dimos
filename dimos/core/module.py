@@ -458,7 +458,7 @@ class Module(ModuleBase[ModuleConfigT]):
                 setattr(self, name, stream)
         super().__init__(*args, **kwargs)
 
-    def set_ref(self, ref) -> int:  # type: ignore[no-untyped-def]
+    def set_ref(self, ref) -> str:  # type: ignore[no-untyped-def]
         try:
             worker = get_worker()
             self.worker = worker.name

@@ -39,24 +39,9 @@ if TYPE_CHECKING:
     import open3d as o3d
     import open3d.core as o3c
 else:
-
-    class _LazyO3D:
-        def __getattr__(self, name):
-            import open3d as o3d_module
-
-            globals()["o3d"] = o3d_module
-            return getattr(o3d_module, name)
-
-    class _LazyO3C:
-        def __getattr__(self, name):
-            import open3d.core as o3c_module
-
-            globals()["o3c"] = o3c_module
-            return getattr(o3c_module, name)
-
-    o3d = _LazyO3D()
-    o3c = _LazyO3C()
-
+    import lazy_loader as lazy
+    o3d = lazy.load("open3d")
+    o3c = lazy.load("open3d.core")
 
 @functools.lru_cache(maxsize=16)
 def _get_matplotlib_cmap(name: str):  # type: ignore[no-untyped-def]
