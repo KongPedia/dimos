@@ -84,10 +84,9 @@ def patchdask(dask_client: DimosCluster, local_cluster: LocalCluster) -> DimosCl
 
         # Check if this module should run locally in the main process (useful for lightweight modules)
         if kwargs.pop("run_locally", False):
-            logger.info("Deploying module locally (thread).", module=actor_class.__name__)
+            logger.info("Deploying module locally (main process).", module=actor_class.__name__)
             actor = actor_class(*args, **kwargs)
-            actor.set_ref(actor)
-            worker = "local"
+            worker = actor.set_ref(actor)
             ActorRegistry.update(str(actor), str(worker))
             return cast("ModuleProxy", RPCClient(actor, actor_class))
 
