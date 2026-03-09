@@ -213,7 +213,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             assert ip is not None, "IP address must be provided"
             self.connection = UnitreeWebRTCConnection(ip)
 
-        Module.__init__(self, *args, **kwargs) 
+        Module.__init__(self, *args, **kwargs)
 
     @rpc
     def record(self, recording_name: str) -> None:
