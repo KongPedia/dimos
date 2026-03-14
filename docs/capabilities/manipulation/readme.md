@@ -99,12 +99,16 @@ KeyboardTeleopModule ──→ ControlCoordinator ──→ ManipulationModule
 | XArm6 | 6 | Y | Y | — |
 | XArm7 | 7 | Y | Y | Y |
 
+## Adding a Custom Arm
+
+[guide is here](/docs/capabilities/manipulation/adding_a_custom_arm.md)
+
 ## Key Files
 
 | File | Description |
 |------|-------------|
 | [`manipulation_module.py`](/dimos/manipulation/manipulation_module.py) | Main module (RPC interface, state machine) |
-| [`manipulation_blueprints.py`](/dimos/manipulation/manipulation_blueprints.py) | Planner and perception blueprints |
+| [`manipulation/blueprints.py`](/dimos/manipulation/blueprints.py) | Planner and perception blueprints |
 | [`robot/manipulators/piper/blueprints.py`](/dimos/robot/manipulators/piper/blueprints.py) | Piper keyboard teleop blueprint |
 | [`robot/manipulators/xarm/blueprints.py`](/dimos/robot/manipulators/xarm/blueprints.py) | XArm keyboard teleop blueprints |
 | [`teleop/keyboard/keyboard_teleop_module.py`](/dimos/teleop/keyboard/keyboard_teleop_module.py) | Keyboard teleop module |

@@ -25,7 +25,9 @@ from dimos_lcm.std_msgs import String
 from reactivex.disposable import CompositeDisposable, Disposable
 
 from dimos.agents.annotation import skill
-from dimos.core import In, Module, Out, rpc
+from dimos.core.core import rpc
+from dimos.core.module import Module
+from dimos.core.stream import In, Out
 from dimos.mapping.types import LatLon
 from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Transform, Twist, Vector3
 from dimos.msgs.sensor_msgs import Image
@@ -267,24 +269,17 @@ class DroneConnectionModule(Module):
         return self._status.copy()
 
     @skill
-    def move(self, vector: Vector3, duration: float = 0.0) -> None:
+    def move(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, duration: float = 0.0) -> None:
         """Send movement command to drone.
 
         Args:
-            vector: Velocity vector [x, y, z] in m/s
+            x: Velocity in x (forward) in m/s
+            y: Velocity in y (left) in m/s
+            z: Velocity in z (up) in m/s
             duration: How long to move (0 = continuous)
         """
         if self.connection:
-            # Convert dict/list to Vector3
-            if isinstance(vector, dict):
-                vector = Vector3(vector.get("x", 0), vector.get("y", 0), vector.get("z", 0))
-            elif isinstance(vector, (list, tuple)):
-                vector = Vector3(
-                    vector[0] if len(vector) > 0 else 0,
-                    vector[1] if len(vector) > 1 else 0,
-                    vector[2] if len(vector) > 2 else 0,
-                )
-            self.connection.move(vector, duration)
+            self.connection.move(Vector3(x, y, z), duration)
 
     @skill
     def takeoff(self, altitude: float = 3.0) -> bool:
