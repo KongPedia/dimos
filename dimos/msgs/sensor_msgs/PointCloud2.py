@@ -152,8 +152,13 @@ class PointCloud2(Timestamped):
         Returns:
             PointCloud2 instance
         """
+        if points.dtype == np.float32 and points.flags.c_contiguous:
+            points_f32 = points
+        else:
+            points_f32 = np.ascontiguousarray(points, dtype=np.float32)
+
         pcd_t = o3d.t.geometry.PointCloud()
-        pcd_t.point["positions"] = o3c.Tensor(points.astype(np.float32), dtype=o3c.float32)
+        pcd_t.point["positions"] = o3c.Tensor(points_f32, dtype=o3c.float32)
         return cls(pointcloud=pcd_t, ts=timestamp, frame_id=frame_id)
 
     @classmethod
@@ -261,7 +266,8 @@ class PointCloud2(Timestamped):
     @functools.cached_property
     def center(self) -> Vector3:
         """Calculate the center of the pointcloud in world frame."""
-        center = np.asarray(self.pointcloud.points).mean(axis=0)
+        points, _ = self.as_numpy()
+        center = points.mean(axis=0)
         return Vector3(*center)
 
     def points(self):  # type: ignore[no-untyped-def]
@@ -344,7 +350,7 @@ class PointCloud2(Timestamped):
         """Downsample the pointcloud with a voxel grid."""
         if voxel_size <= 0:
             return self
-        if len(self.pointcloud.points) < 20:
+        if len(self) < 20:
             return self
         downsampled = self._pcd_tensor.voxel_down_sample(voxel_size)
         return PointCloud2(pointcloud=downsampled, frame_id=self.frame_id, ts=self.ts)
@@ -359,8 +365,15 @@ class PointCloud2(Timestamped):
             - points: Nx3 numpy array of 3D points
             - colors: Nx3 array in [0, 1] range, or None if no colors
         """
-        points = np.asarray(self.pointcloud.points)
-        colors = np.asarray(self.pointcloud.colors) if self.pointcloud.has_colors() else None
+        self._ensure_tensor_initialized()
+        if "positions" in self._pcd_tensor.point:
+            points = self._pcd_tensor.point["positions"].numpy()
+        else:
+            points = np.zeros((0, 3), dtype=np.float32)
+
+        colors = (
+            self._pcd_tensor.point["colors"].numpy() if "colors" in self._pcd_tensor.point else None
+        )
         return points, colors
 
     @functools.cached_property

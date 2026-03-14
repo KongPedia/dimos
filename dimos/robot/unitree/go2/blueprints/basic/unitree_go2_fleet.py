@@ -32,7 +32,11 @@ unitree_go2_fleet = (
         go2_fleet_connection(),
         websocket_vis(),
     )
-    .global_config(n_workers=4, robot_model="unitree_go2")
+    .global_config(
+        n_workers=4,
+        robot_model="unitree_go2",
+        unitree_connection="webrtc-rs",
+    )
     .configurators(ClockSyncConfigurator())
 )
 

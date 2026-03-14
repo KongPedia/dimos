@@ -31,7 +31,7 @@ def _get_all_numbers(s: str) -> list[float]:
 
 class GlobalConfig(BaseSettings):
     robot_ip: str | None = None
-    unitree_connection: Literal["webrtc", "replay", "mujoco", "ros"] | None = None
+    unitree_connection: Literal["webrtc", "webrtc-rs", "replay", "mujoco", "ros"] | None = None
     robot_ips: str | None = None
     simulation: bool = False
     replay: bool = False

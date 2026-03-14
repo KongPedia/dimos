@@ -17,19 +17,38 @@
 import platform
 from typing import Any
 
-from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
+from dimos.constants import (
+    DEFAULT_CAPACITY_COLOR_IMAGE,
+    DEFAULT_CAPACITY_OCCUPANCY_GRID,
+    DEFAULT_CAPACITY_POINTCLOUD,
+)
 from dimos.core.blueprints import autoconnect
 from dimos.core.global_config import global_config
 from dimos.core.transport import pSHMTransport
-from dimos.msgs.sensor_msgs import Image
+from dimos.msgs.nav_msgs import OccupancyGrid
+from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.protocol.pubsub.impl.lcmpubsub import LCM
 from dimos.protocol.service.system_configurator import ClockSyncConfigurator
 from dimos.robot.unitree.go2.connection import go2_connection
 from dimos.web.websocket_vis.websocket_vis_module import websocket_vis
 
-# Mac has some issue with high bandwidth UDP, so we use pSHMTransport for color_image
-# actually we can use pSHMTransport for all platforms, and for all streams
-# TODO need a global transport toggle on blueprints/global config
+# Linux/Jetson benefits from keeping high-bandwidth streams off LCM.
+_linux_transports = {
+    ("lidar", PointCloud2): pSHMTransport(
+        "lidar", default_capacity=DEFAULT_CAPACITY_POINTCLOUD
+    ),
+    ("color_image", Image): pSHMTransport(
+        "color_image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
+    ),
+    ("global_map", PointCloud2): pSHMTransport(
+        "global_map", default_capacity=DEFAULT_CAPACITY_POINTCLOUD
+    ),
+    ("global_costmap", OccupancyGrid): pSHMTransport(
+        "global_costmap", default_capacity=DEFAULT_CAPACITY_OCCUPANCY_GRID
+    ),
+}
+
+# Mac has some issue with high bandwidth UDP, so we use pSHMTransport for color_image.
 _mac_transports: dict[tuple[str, type], pSHMTransport[Image]] = {
     ("color_image", Image): pSHMTransport(
         "color_image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
@@ -37,7 +56,9 @@ _mac_transports: dict[tuple[str, type], pSHMTransport[Image]] = {
 }
 
 _transports_base = (
-    autoconnect() if platform.system() == "Linux" else autoconnect().transports(_mac_transports)
+    autoconnect().transports(_linux_transports)
+    if platform.system() == "Linux"
+    else autoconnect().transports(_mac_transports)
 )
 
 
@@ -129,7 +150,11 @@ unitree_go2_basic = (
         go2_connection(),
         websocket_vis(),
     )
-    .global_config(n_workers=4, robot_model="unitree_go2")
+    .global_config(
+        n_workers=4,
+        robot_model="unitree_go2",
+        unitree_connection="webrtc-rs",
+    )
     .configurators(ClockSyncConfigurator())
 )
 

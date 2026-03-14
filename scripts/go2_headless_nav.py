@@ -39,10 +39,19 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
+from dimos.constants import (
+    DEFAULT_CAPACITY_COLOR_IMAGE,
+    DEFAULT_CAPACITY_OCCUPANCY_GRID,
+    DEFAULT_CAPACITY_POINTCLOUD,
+)
 from dimos.core.blueprints import autoconnect
+from dimos.core.transport import pSHMTransport
 from dimos.mapping.costmapper import cost_mapper
+from dimos.mapping.pointclouds.occupancy import HeightCostConfig
 from dimos.mapping.voxels import voxel_mapper
 from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Vector3
+from dimos.msgs.nav_msgs import OccupancyGrid
+from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector import (
     WavefrontFrontierExplorer,
     wavefront_frontier_explorer,
@@ -54,6 +63,22 @@ from dimos.navigation.replanning_a_star.module import (
 from dimos.protocol import pubsub
 from dimos.robot.unitree.go2.connection import GO2Connection, go2_connection
 from unitree_webrtc_connect.constants import RTC_TOPIC
+
+
+JETSON_TRANSPORTS = {
+    ("lidar", PointCloud2): pSHMTransport(
+        "lidar", default_capacity=DEFAULT_CAPACITY_POINTCLOUD
+    ),
+    ("color_image", Image): pSHMTransport(
+        "color_image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
+    ),
+    ("global_map", PointCloud2): pSHMTransport(
+        "global_map", default_capacity=DEFAULT_CAPACITY_POINTCLOUD
+    ),
+    ("global_costmap", OccupancyGrid): pSHMTransport(
+        "global_costmap", default_capacity=DEFAULT_CAPACITY_OCCUPANCY_GRID
+    ),
+}
 
 
 def _resolve_voxel_device(requested_device: str) -> str:
@@ -89,9 +114,42 @@ def _pose_from_xy_yaw(x: float, y: float, yaw_deg: float) -> PoseStamped:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Headless Go2 navigation terminal control")
     parser.add_argument("--robot-ip", required=True, help="Unitree Go2 IP address")
-    parser.add_argument("--n-dask-workers", type=int, default=6, help="Dask workers")
+    parser.add_argument(
+        "--unitree-connection",
+        choices=["webrtc", "webrtc-rs", "replay", "mujoco", "ros"],
+        default="webrtc-rs",
+        help="Backend used for the Unitree connection",
+    )
+    parser.add_argument(
+        "--n-workers",
+        "--n-dask-workers",
+        dest="n_workers",
+        type=int,
+        default=2,
+        help="Worker processes",
+    )
+    parser.add_argument(
+        "--memory-limit",
+        "--dask-memory-limit",
+        dest="memory_limit",
+        type=str,
+        default="2GiB",
+        help="Worker memory limit hint",
+    )
     parser.add_argument("--planner-robot-speed", type=float, default=None)
     parser.add_argument("--navigation-voxel-size", type=float, default=0.2)
+    parser.add_argument(
+        "--map-publish-interval",
+        type=float,
+        default=0.2,
+        help="Seconds between global_map publishes (0 = every frame)",
+    )
+    parser.add_argument(
+        "--costmap-update-interval",
+        type=float,
+        default=0.2,
+        help="Seconds between costmap updates (0 = every map update)",
+    )
     parser.add_argument("--goal-timeout", type=float, default=15.0)
     parser.add_argument("--voxel-device", default="CUDA:0", help="Voxel mapper device")
     parser.add_argument("--skip-recovery", action="store_true", help="Skip recovery stand on startup")
@@ -278,14 +336,23 @@ def main() -> None:
     # Same stack as `dimos run unitree-go2`, but headless (no UI module).
     blueprint = autoconnect(
         go2_connection(),
-        voxel_mapper(voxel_size=args.navigation_voxel_size, device=voxel_device),
-        cost_mapper(),
+        voxel_mapper(
+            voxel_size=args.navigation_voxel_size,
+            device=voxel_device,
+            publish_interval=args.map_publish_interval,
+        ),
+        cost_mapper(
+            config=HeightCostConfig(use_float64=False),
+            update_interval=args.costmap_update_interval,
+        ),
         replanning_a_star_planner(),
         wavefront_frontier_explorer(goal_timeout=args.goal_timeout),
-    ).global_config(
+    ).transports(JETSON_TRANSPORTS).global_config(
         robot_ip=args.robot_ip,
-        viewer_backend="none",
-        n_dask_workers=args.n_dask_workers,
+        unitree_connection=args.unitree_connection,
+        viewer="none",
+        n_workers=args.n_workers,
+        memory_limit=args.memory_limit,
         planner_robot_speed=args.planner_robot_speed,
         robot_model="unitree_go2",
     )

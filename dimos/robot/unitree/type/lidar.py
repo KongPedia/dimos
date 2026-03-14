@@ -18,7 +18,6 @@ import time
 from typing import TypedDict
 
 import numpy as np
-import open3d as o3d  # type: ignore[import-untyped]
 
 from dimos.msgs.sensor_msgs import PointCloud2
 
@@ -61,14 +60,11 @@ def pointcloud2_from_webrtc_lidar(raw_message: RawLidarMsg, ts: float | None = N
         PointCloud2 message with the lidar points
     """
     data = raw_message["data"]
-    points = data["data"]["points"]
+    points = np.ascontiguousarray(data["data"]["points"], dtype=np.float32)
 
-    pointcloud = o3d.geometry.PointCloud()
-    pointcloud.points = o3d.utility.Vector3dVector(points)
-
-    return PointCloud2(
-        pointcloud=pointcloud,
+    return PointCloud2.from_numpy(
+        points=points,
         # webrtc stamp is broken (e.g., "stamp": 1.758148e+09), use current time
-        ts=ts if ts is not None else time.time(),
+        timestamp=ts if ts is not None else time.time(),
         frame_id="world",
     )

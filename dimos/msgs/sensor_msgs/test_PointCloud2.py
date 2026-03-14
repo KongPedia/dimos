@@ -35,9 +35,9 @@ def test_lcm_encode_decode() -> None:
 
     print(f"Original points: {len(original_points)}")
     print(f"Decoded points: {len(decoded_points)}")
-    assert len(original_points) == len(decoded_points), (
-        f"Point count mismatch: {len(original_points)} vs {len(decoded_points)}"
-    )
+    assert len(original_points) == len(
+        decoded_points
+    ), f"Point count mismatch: {len(original_points)} vs {len(decoded_points)}"
 
     # 2. Check point coordinates are preserved (within floating point tolerance)
     if len(original_points) > 0:
@@ -51,22 +51,22 @@ def test_lcm_encode_decode() -> None:
         print(f"✓ All {len(original_points)} point coordinates match within tolerance")
 
     # 3. Check frame_id is preserved
-    assert lidar_msg.frame_id == decoded.frame_id, (
-        f"Frame ID mismatch: '{lidar_msg.frame_id}' vs '{decoded.frame_id}'"
-    )
+    assert (
+        lidar_msg.frame_id == decoded.frame_id
+    ), f"Frame ID mismatch: '{lidar_msg.frame_id}' vs '{decoded.frame_id}'"
     print(f"✓ Frame ID preserved: '{decoded.frame_id}'")
 
     # 4. Check timestamp is preserved (within reasonable tolerance for float precision)
     if lidar_msg.ts is not None and decoded.ts is not None:
-        assert abs(lidar_msg.ts - decoded.ts) < 1e-6, (
-            f"Timestamp mismatch: {lidar_msg.ts} vs {decoded.ts}"
-        )
+        assert (
+            abs(lidar_msg.ts - decoded.ts) < 1e-6
+        ), f"Timestamp mismatch: {lidar_msg.ts} vs {decoded.ts}"
         print(f"✓ Timestamp preserved: {decoded.ts}")
 
     # 5. Check pointcloud properties
-    assert len(lidar_msg.pointcloud.points) == len(decoded.pointcloud.points), (
-        "Open3D pointcloud size mismatch"
-    )
+    assert len(lidar_msg.pointcloud.points) == len(
+        decoded.pointcloud.points
+    ), "Open3D pointcloud size mismatch"
 
     # 6. Additional detailed checks
     print("✓ Original pointcloud summary:")
@@ -80,6 +80,28 @@ def test_lcm_encode_decode() -> None:
     print(f"  - Mean: {decoded_points.mean(axis=0)}")
 
     print("✓ LCM encode/decode test passed - all properties preserved!")
+
+
+def test_from_numpy_keeps_float32_points() -> None:
+    points = np.arange(18, dtype=np.float32).reshape(6, 3)
+
+    msg = PointCloud2.from_numpy(points)
+    restored_points, _ = msg.as_numpy()
+
+    assert restored_points.dtype == np.float32
+    np.testing.assert_allclose(restored_points, points)
+
+
+def test_from_numpy_normalizes_non_contiguous_input() -> None:
+    base = np.arange(36, dtype=np.float64).reshape(6, 6)
+    points = base[:, ::2]
+    assert not points.flags.c_contiguous
+
+    msg = PointCloud2.from_numpy(points)
+    restored_points, _ = msg.as_numpy()
+
+    assert restored_points.dtype == np.float32
+    np.testing.assert_allclose(restored_points, points.astype(np.float32))
 
 
 def test_bounding_box_intersects() -> None:
@@ -121,7 +143,12 @@ def test_bounding_box_intersects() -> None:
     pc_det1 = PointCloud2.from_numpy(detection1_points)
 
     detection2_points = np.array(
-        [[-3.4, -0.25, 0.15], [-3.2, -0.15, 0.15], [-3.4, -0.25, 0.35], [-3.2, -0.15, 0.35]]
+        [
+            [-3.4, -0.25, 0.15],
+            [-3.2, -0.15, 0.15],
+            [-3.4, -0.25, 0.35],
+            [-3.2, -0.15, 0.35],
+        ]
     )
     pc_det2 = PointCloud2.from_numpy(detection2_points)
 

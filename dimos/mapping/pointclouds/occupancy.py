@@ -138,6 +138,12 @@ class HeightCostConfig(OccupancyConfig):
     can_climb: float = 0.15
     ignore_noise: float = 0.05
     smoothing: float = 1.0
+    use_float64: bool = False
+
+
+def _normalize_points_dtype(points: NDArray[np.floating[Any]], use_float64: bool) -> NDArray[np.floating[Any]]:
+    dtype = np.float64 if use_float64 else np.float32
+    return np.ascontiguousarray(points, dtype=dtype)
 
 
 def height_cost_occupancy(cloud: PointCloud2, **kwargs: Any) -> OccupancyGrid:
@@ -157,7 +163,7 @@ def height_cost_occupancy(cloud: PointCloud2, **kwargs: Any) -> OccupancyGrid:
     """
     cfg = HeightCostConfig(**kwargs)
     points, _ = cloud.as_numpy()
-    points = points.astype(np.float64)  # Upcast to avoid float32 rounding
+    points = _normalize_points_dtype(points, cfg.use_float64)
     ts = cloud.ts if hasattr(cloud, "ts") and cloud.ts is not None else 0.0
 
     if len(points) == 0:
@@ -291,6 +297,7 @@ class GeneralOccupancyConfig(OccupancyConfig):
     min_height: float = 0.1
     max_height: float = 2.0
     mark_free_radius: float = 0.4
+    use_float64: bool = False
 
 
 # can remove, just needs pulling out of unitree type/map.py
@@ -307,7 +314,7 @@ def general_occupancy(cloud: PointCloud2, **kwargs: Any) -> OccupancyGrid:
     """
     cfg = GeneralOccupancyConfig(**kwargs)
     points, _ = cloud.as_numpy()
-    points = points.astype(np.float64)  # Upcast to avoid float32 rounding
+    points = _normalize_points_dtype(points, cfg.use_float64)
 
     if len(points) == 0:
         return OccupancyGrid(
@@ -422,6 +429,7 @@ class SimpleOccupancyConfig(OccupancyConfig):
     can_climb: float = 0.15
     ignore_noise: float = 0.05
     smoothing: float = 1.0
+    use_float64: bool = False
 
 
 def simple_occupancy(cloud: PointCloud2, **kwargs: Any) -> OccupancyGrid:
@@ -437,7 +445,7 @@ def simple_occupancy(cloud: PointCloud2, **kwargs: Any) -> OccupancyGrid:
     """
     cfg = SimpleOccupancyConfig(**kwargs)
     points, _ = cloud.as_numpy()
-    points = points.astype(np.float64)  # Upcast to avoid float32 rounding
+    points = _normalize_points_dtype(points, cfg.use_float64)
 
     if len(points) == 0:
         return OccupancyGrid(

@@ -38,6 +38,7 @@ logger = setup_logger()
 class Config(ModuleConfig):
     algo: str = "height_cost"
     config: OccupancyConfig = field(default_factory=HeightCostConfig)
+    update_interval: float = 0.2
 
 
 class CostMapper(Module):
@@ -68,10 +69,14 @@ class CostMapper(Module):
             elapsed_ms = (time.perf_counter() - start) * 1000
             return grid, elapsed_ms, rx_monotonic
 
+        stream = self.global_map.observable()  # type: ignore[no-untyped-call]
+        if self.config.update_interval > 0:
+            stream = stream.pipe(ops.sample(self.config.update_interval))
+
         self._disposables.add(
-            self.global_map.observable()  # type: ignore[no-untyped-call]
-            .pipe(ops.map(_calculate_and_time))
-            .subscribe(lambda result: _publish_costmap(result[0], result[1], result[2]))
+            stream.pipe(ops.map(_calculate_and_time)).subscribe(
+                lambda result: _publish_costmap(result[0], result[1], result[2])
+            )
         )
 
     @rpc
