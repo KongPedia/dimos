@@ -87,16 +87,20 @@ class PointCloud2(Timestamped):
         if not hasattr(self, "_pcd_tensor"):
             self._pcd_tensor = o3d.t.geometry.PointCloud()
 
+    def _point_attr_numpy(self, name: str) -> np.ndarray[Any, Any] | None:
+        self._ensure_tensor_initialized()
+        if name not in self._pcd_tensor.point:
+            return None
+        return self._pcd_tensor.point[name].to(o3c.Device("CPU:0")).numpy()
+
     def __getstate__(self) -> dict[str, object]:
         """Serialize to numpy for pickling (tensors don't pickle well)."""
         self._ensure_tensor_initialized()
         state = self.__dict__.copy()
-        # Convert tensor to numpy for serialization
-        if "positions" in self._pcd_tensor.point:
-            state["_pcd_numpy"] = self._pcd_tensor.point["positions"].numpy()
-        else:
-            state["_pcd_numpy"] = np.zeros((0, 3), dtype=np.float32)
-        # Remove non-picklable objects
+        positions = self._point_attr_numpy("positions")
+        state["_pcd_numpy"] = (
+            positions if isinstance(positions, np.ndarray) else np.zeros((0, 3), dtype=np.float32)
+        )
         del state["_pcd_tensor"]
         state["_pcd_legacy_cache"] = None
         return state
@@ -118,7 +122,7 @@ class PointCloud2(Timestamped):
         """Legacy pointcloud property for backwards compatibility. Cached."""
         self._ensure_tensor_initialized()
         if self._pcd_legacy_cache is None:
-            self._pcd_legacy_cache = self._pcd_tensor.to_legacy()
+            self._pcd_legacy_cache = self._pcd_tensor.to(o3c.Device("CPU:0")).to_legacy()
         return self._pcd_legacy_cache
 
     @pointcloud.setter
@@ -366,14 +370,11 @@ class PointCloud2(Timestamped):
             - colors: Nx3 array in [0, 1] range, or None if no colors
         """
         self._ensure_tensor_initialized()
-        if "positions" in self._pcd_tensor.point:
-            points = self._pcd_tensor.point["positions"].numpy()
-        else:
+        points = self._point_attr_numpy("positions")
+        if not isinstance(points, np.ndarray):
             points = np.zeros((0, 3), dtype=np.float32)
 
-        colors = (
-            self._pcd_tensor.point["colors"].numpy() if "colors" in self._pcd_tensor.point else None
-        )
+        colors = self._point_attr_numpy("colors")
         return points, colors
 
     @functools.cached_property
@@ -451,7 +452,9 @@ class PointCloud2(Timestamped):
 
         if has_colors:
             # Get colors (0-1 range) and convert to uint8
-            colors = self._pcd_tensor.point["colors"].numpy()
+            colors = self._point_attr_numpy("colors")
+            if colors is None:
+                colors = np.zeros((len(points), 3), dtype=np.float32)
             if colors.max() <= 1.0:
                 colors = (colors * 255).astype(np.uint8)
             else:

@@ -258,28 +258,28 @@ def _mqtt_listener(
         try:
             payload = json.loads(msg.payload.decode('utf-8'))
             print(f"[MQTT] Received: {msg.topic} -> {payload}")
-            
+
             if "cmd/move" in msg.topic:
                 params = payload.get("params", payload)
                 x = float(params["x"])
                 y = float(params["y"])
                 yaw_deg = float(params.get("yaw", 0.0))
-                
+
                 goal = _pose_from_xy_yaw(x, y, yaw_deg)
                 accepted = navigator.set_goal(goal)
                 print(f"[MQTT] Goal set: ({x:.3f}, {y:.3f}, yaw={yaw_deg:.1f}deg) accepted={accepted}")
-            
+
             elif "cmd/stop" in msg.topic:
                 cancelled = navigator.cancel_goal()
                 print(f"[MQTT] Goal cancelled: {cancelled}")
-        
+
         except Exception as e:
             print(f"[MQTT] Error processing message: {e}")
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"go2_nav_{robot_id}")
     client.on_connect = on_connect
     client.on_message = on_message
-    
+
     try:
         client.connect(broker_host, broker_port, 60)
         print(f"[MQTT] Connecting to {broker_host}:{broker_port}...")
@@ -370,7 +370,7 @@ def main() -> None:
 
     print("Headless Go2 navigation is running.")
     print(f"robot_ip={args.robot_ip}, voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}")
-    
+
     # Start MQTT listener if broker is specified
     mqtt_thread = None
     if args.mqtt_broker:
@@ -379,7 +379,7 @@ def main() -> None:
             print("Install with: uv pip install paho-mqtt")
             coordinator.stop()
             return
-        
+
         print(f"[MQTT] Starting MQTT listener for robot_id={args.robot_id}")
         mqtt_thread = threading.Thread(
             target=_mqtt_listener,
@@ -429,3 +429,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

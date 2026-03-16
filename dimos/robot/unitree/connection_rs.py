@@ -18,7 +18,7 @@ import asyncio
 import functools
 import threading
 import time
-from typing import Any, TypeAlias
+from typing import Any, Callable, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
@@ -61,6 +61,13 @@ class UnitreeWebRTCRSConnection(Resource):
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
         return future.result()
 
+    def _run_async_call(self, fn: Callable[[], Any]) -> Any:
+        async def runner() -> Any:
+            return await fn()
+
+        future = asyncio.run_coroutine_threadsafe(runner(), self.loop)
+        return future.result()
+
     def _run_sync_in_loop(self, fn) -> None:  # type: ignore[no-untyped-def]
         if self.loop.is_closed():
             return
@@ -97,7 +104,15 @@ class UnitreeWebRTCRSConnection(Resource):
             raise RuntimeError(f"Failed to connect to Unitree via webrtc-rs: {self._connect_error}")
 
     def start(self) -> None:
-        pass
+        needs_reconnect = (
+            not hasattr(self, "loop")
+            or not hasattr(self, "thread")
+            or self.loop.is_closed()
+            or
+            not self.thread.is_alive()
+        )
+        if needs_reconnect:
+            self.connect()
 
     def _publish_wireless_controller(self, *, lx: float, ly: float, rx: float, ry: float = 0.0) -> None:
         self.conn.datachannel.pub_sub.publish_without_callback(
@@ -206,7 +221,9 @@ class UnitreeWebRTCRSConnection(Resource):
 
     # Generic sync API call (we jump into the client thread)
     def publish_request(self, topic: str, data: dict[Any, Any]) -> Any:
-        return self._run_coro(self.conn.datachannel.pub_sub.publish_request_new(topic, data))
+        return self._run_async_call(
+            lambda: self.conn.datachannel.pub_sub.publish_request_new(topic, data)
+        )
 
     @simple_mcache
     def raw_lidar_stream(self) -> Observable[RawLidarMsg]:
