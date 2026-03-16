@@ -68,6 +68,7 @@ from dimos.constants import (
 from dimos.core.blueprints import autoconnect
 from dimos.core.transport import pSHMTransport
 from dimos.mapping.costmapper import cost_mapper
+from dimos.mapping.localization import localization_module
 from dimos.mapping.pointclouds.occupancy import HeightCostConfig
 from dimos.mapping.voxels import voxel_mapper
 from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Vector3
@@ -188,6 +189,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--initial-yaw", type=float, default=None, help="Initial pose yaw (radians)")
     parser.add_argument("--alignment-frame", type=str, default="map", help="Target frame for alignment (default: map)")
     parser.add_argument("--robot-frame-namespace", type=str, default=None, help="Explicit frame namespace prefix (overrides robot-id)")
+    
+    # Continuous localization options
+    parser.add_argument("--localization-update-rate", type=float, default=2.0, help="Localization update rate in Hz (default: 2.0)")
+    parser.add_argument("--disable-localization", action="store_true", help="Disable continuous scan matching localization")
+    parser.add_argument("--localization-min-fitness", type=float, default=0.3, help="Minimum ICP fitness score (default: 0.3)")
     
     return parser
 
@@ -434,8 +440,8 @@ def main() -> None:
     # Load map if specified
     preloaded_map = _load_map_if_specified(args)
 
-    # Build blueprint
-    blueprint = autoconnect(
+    # Build blueprint with localization
+    modules = [
         go2_connection(),
         voxel_mapper(
             voxel_size=args.navigation_voxel_size,
@@ -448,7 +454,25 @@ def main() -> None:
         ),
         replanning_a_star_planner(),
         wavefront_frontier_explorer(goal_timeout=args.goal_timeout),
-    ).transports(JETSON_TRANSPORTS).global_config(**config_kwargs)
+    ]
+    
+    # Add localization module if not disabled
+    if not args.disable_localization:
+        from dimos.mapping.localization import LocalizationConfig
+        
+        localization_config = LocalizationConfig(
+            alignment_frame=args.alignment_frame,
+            update_rate=args.localization_update_rate,
+            enable_continuous_localization=True,
+            min_fitness_score=args.localization_min_fitness,
+        )
+        modules.append(localization_module(
+            alignment_frame=args.alignment_frame,
+            update_rate=args.localization_update_rate,
+            enable=True,
+        ))
+    
+    blueprint = autoconnect(*modules).transports(JETSON_TRANSPORTS).global_config(**config_kwargs)
 
     pubsub.lcm.autoconf()  # type: ignore[attr-defined]
     coordinator = blueprint.build()
@@ -470,6 +494,12 @@ def main() -> None:
         print(f"initial pose alignment enabled, target frame={args.alignment_frame}")
     if preloaded_map:
         print(f"preloaded map: {preloaded_map.width}x{preloaded_map.height}")
+    
+    # Localization status
+    if not args.disable_localization:
+        print(f"continuous localization: ENABLED (update_rate={args.localization_update_rate}Hz, min_fitness={args.localization_min_fitness})")
+    else:
+        print("continuous localization: DISABLED")
 
     # Start MQTT listener if broker is specified
     mqtt_thread = None
