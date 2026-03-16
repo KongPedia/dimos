@@ -369,6 +369,33 @@ def _dispatch_command(
     return True
 
 
+def _occupancy_grid_to_pointcloud(grid: OccupancyGrid) -> PointCloud2:
+    """Convert OccupancyGrid to PointCloud2 for localization.
+    
+    Extracts occupied cells (value > threshold) as 3D points.
+    """
+    import numpy as np
+    
+    occupied_threshold = 50  # cells with value > 50 are considered occupied
+    points = []
+    
+    # Extract occupied cells
+    for y in range(grid.height):
+        for x in range(grid.width):
+            cell_value = grid.grid[y, x]
+            if cell_value > occupied_threshold:
+                # Convert grid coordinates to world coordinates
+                world_pos = grid.grid_to_world((x, y))
+                points.append([world_pos.x, world_pos.y, 0.0])
+    
+    if len(points) == 0:
+        print("[WARN] No occupied cells found in map")
+        points = [[0, 0, 0]]  # Add dummy point
+    
+    points_array = np.array(points, dtype=np.float32)
+    return PointCloud2.from_numpy(points_array, frame_id=grid.frame_id)
+
+
 def _load_map_if_specified(args: argparse.Namespace) -> OccupancyGrid | None:
     """Load map from YAML if specified."""
     if not args.map_yaml:
@@ -484,6 +511,21 @@ def main() -> None:
     assert navigator is not None
     assert explorer is not None
     assert connection is not None
+    
+    # Inject preloaded map into LocalizationModule if available
+    if preloaded_map and not args.disable_localization:
+        from dimos.mapping.localization import LocalizationModule
+        
+        localization = coordinator.get_instance(LocalizationModule)
+        if localization is not None:
+            print("[INFO] Injecting preloaded map into LocalizationModule...")
+            try:
+                # Convert OccupancyGrid to PointCloud2 for localization
+                map_pointcloud = _occupancy_grid_to_pointcloud(preloaded_map)
+                localization._on_global_map(map_pointcloud)
+                print(f"[INFO] Preloaded map injected: {len(map_pointcloud.to_numpy())} points")
+            except Exception as e:
+                print(f"[WARN] Failed to inject preloaded map: {e}")
 
     print("Headless Go2 navigation (aligned) is running.")
     print(f"robot_ip={args.robot_ip}, voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}")
