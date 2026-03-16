@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 from functools import lru_cache
+import math
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, BinaryIO
@@ -267,6 +268,8 @@ class OccupancyGrid(Timestamped):
     def world_to_grid(self, point: VectorLike) -> Vector3:
         """Convert world coordinates to grid coordinates.
 
+        Takes origin rotation (yaw) into account.
+
         Args:
             point: A vector-like object containing X,Y coordinates
 
@@ -274,18 +277,31 @@ class OccupancyGrid(Timestamped):
             Vector3 with grid coordinates
         """
         positionVector = Vector3(point)
-        # Get origin position
+        # Get origin position and rotation
         ox = self.origin.position.x
         oy = self.origin.position.y
+        yaw = self.origin.orientation.to_euler().z
 
-        # Convert to grid coordinates (simplified, assuming no rotation)
-        grid_x = (positionVector.x - ox) / self.resolution
-        grid_y = (positionVector.y - oy) / self.resolution
+        # Translate to origin-relative coordinates
+        dx = positionVector.x - ox
+        dy = positionVector.y - oy
+
+        # Apply inverse rotation (rotate by -yaw)
+        cos_yaw = math.cos(-yaw)
+        sin_yaw = math.sin(-yaw)
+        local_x = dx * cos_yaw - dy * sin_yaw
+        local_y = dx * sin_yaw + dy * cos_yaw
+
+        # Scale to grid coordinates
+        grid_x = local_x / self.resolution
+        grid_y = local_y / self.resolution
 
         return Vector3(grid_x, grid_y, 0.0)
 
     def grid_to_world(self, grid_point: VectorLike) -> Vector3:
         """Convert grid coordinates to world coordinates.
+
+        Takes origin rotation (yaw) into account.
 
         Args:
             grid_point: Vector-like object containing grid coordinates
@@ -294,13 +310,24 @@ class OccupancyGrid(Timestamped):
             World position as Vector3
         """
         gridVector = Vector3(grid_point)
-        # Get origin position
+        # Get origin position and rotation
         ox = self.origin.position.x
         oy = self.origin.position.y
+        yaw = self.origin.orientation.to_euler().z
 
-        # Convert to world (simplified, no rotation)
-        x = ox + gridVector.x * self.resolution
-        y = oy + gridVector.y * self.resolution
+        # Scale to local metric coordinates
+        local_x = gridVector.x * self.resolution
+        local_y = gridVector.y * self.resolution
+
+        # Apply rotation
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+        rotated_x = local_x * cos_yaw - local_y * sin_yaw
+        rotated_y = local_x * sin_yaw + local_y * cos_yaw
+
+        # Translate to world coordinates
+        x = ox + rotated_x
+        y = oy + rotated_y
 
         return Vector3(x, y, 0.0)
 

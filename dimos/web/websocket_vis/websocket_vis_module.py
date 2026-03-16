@@ -387,6 +387,9 @@ class WebsocketVisModule(Module):
         costmap = gradient(simple_inflate(costmap, 0.1), max_distance=1.0)
         grid_data = self.costmap_encoder.encode_costmap(costmap.grid)
 
+        # Extract yaw from origin orientation
+        origin_yaw = costmap.origin.orientation.to_euler().z
+
         return {
             "type": "costmap",
             "grid": grid_data,
@@ -395,7 +398,7 @@ class WebsocketVisModule(Module):
                 "c": [costmap.origin.position.x, costmap.origin.position.y, 0],
             },
             "resolution": costmap.resolution,
-            "origin_theta": 0,  # Assuming no rotation for now
+            "origin_theta": origin_yaw,
         }
 
     def _emit(self, event: str, data: Any) -> None:

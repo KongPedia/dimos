@@ -85,7 +85,13 @@ def _camera_info_static() -> CameraInfo:
 
 
 def make_connection(ip: str | None, cfg: GlobalConfig) -> Go2ConnectionProtocol:
-    return _make_connection(ip, cfg)
+    raw_connection = _make_connection(ip, cfg)
+    
+    # Wrap with AlignedGo2Connection if namespace or alignment is configured
+    if cfg.robot_id or cfg.robot_frame_namespace or cfg.navigation_enable_initial_alignment:
+        return AlignedGo2Connection(raw_connection, cfg)
+    
+    return raw_connection
 
 
 def _make_connection(
@@ -137,6 +143,174 @@ def _make_connection(
 
     assert ip is not None, "IP address must be provided"
     return UnitreeWebRTCConnection(ip)
+
+
+class AlignedGo2Connection:
+    """Wrapper for Go2 connection that adds optional frame namespace and initial pose alignment.
+    
+    This wrapper:
+    - Applies robot_id-based frame prefixing to robot-local frames (odom, base_link, camera_*)
+    - Keeps global frames (map, world) unprefixed
+    - Optionally anchors initial odom/lidar to a specified map pose
+    """
+
+    def __init__(
+        self,
+        raw_connection: Go2ConnectionProtocol,
+        cfg: GlobalConfig,
+    ) -> None:
+        self._raw = raw_connection
+        self._cfg = cfg
+        
+        # Compute frame namespace prefix
+        if cfg.robot_frame_namespace:
+            self._frame_prefix = cfg.robot_frame_namespace
+        elif cfg.robot_id:
+            self._frame_prefix = cfg.robot_id
+        else:
+            self._frame_prefix = None
+        
+        # Initial pose alignment state
+        self._computed_init_tf: Transform | None = None
+        self._last_map_pose: Transform | None = None
+        
+        if cfg.navigation_enable_initial_alignment:
+            self._setup_initial_alignment()
+
+    def _setup_initial_alignment(self) -> None:
+        """Load initial pose from config or file."""
+        cfg = self._cfg
+        
+        # Priority 1: Explicit x, y, yaw from config
+        if cfg.navigation_initial_x is not None and cfg.navigation_initial_y is not None:
+            yaw = cfg.navigation_initial_yaw or 0.0
+            self._last_map_pose = Transform(
+                translation=Vector3(cfg.navigation_initial_x, cfg.navigation_initial_y, 0.0),
+                rotation=Quaternion.from_euler(Vector3(0.0, 0.0, yaw)),
+                frame_id=cfg.navigation_alignment_frame,
+                child_frame_id=self._robot_frame("base_link"),
+            )
+            return
+        
+        # Priority 2: Load from JSON file
+        if cfg.navigation_initial_pose_path:
+            import json
+            from pathlib import Path
+            
+            pose_path = Path(cfg.navigation_initial_pose_path)
+            if pose_path.exists():
+                try:
+                    with open(pose_path) as f:
+                        data = json.load(f)
+                    
+                    orientation = data.get("orientation", {})
+                    self._last_map_pose = Transform(
+                        translation=Vector3(
+                            float(data.get("x", 0.0)),
+                            float(data.get("y", 0.0)),
+                            float(data.get("z", 0.0)),
+                        ),
+                        rotation=Quaternion(
+                            float(orientation.get("x", 0.0)),
+                            float(orientation.get("y", 0.0)),
+                            float(orientation.get("z", 0.0)),
+                            float(orientation.get("w", 1.0)),
+                        ),
+                        frame_id=cfg.navigation_alignment_frame,
+                        child_frame_id=self._robot_frame("base_link"),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to load initial pose from {pose_path}: {e}")
+
+    def _robot_frame(self, base_name: str) -> str:
+        """Apply namespace prefix to robot-local frame names."""
+        if self._frame_prefix and base_name not in ("map", "world"):
+            return f"{self._frame_prefix}/{base_name}"
+        return base_name
+
+    def start(self) -> None:
+        self._raw.start()
+
+    def stop(self) -> None:
+        self._raw.stop()
+
+    def move(self, twist: Twist, duration: float = 0.0) -> bool:
+        return self._raw.move(twist, duration)
+
+    def standup(self) -> bool:
+        return self._raw.standup()
+
+    def liedown(self) -> bool:
+        return self._raw.liedown()
+
+    def balance_stand(self) -> bool:
+        return self._raw.balance_stand()
+
+    def set_obstacle_avoidance(self, enabled: bool = True) -> None:
+        self._raw.set_obstacle_avoidance(enabled)
+
+    def publish_request(self, topic: str, data: dict) -> dict:  # type: ignore[type-arg]
+        return self._raw.publish_request(topic, data)
+
+    @simple_mcache
+    def lidar_stream(self) -> Observable:  # type: ignore[type-arg]
+        def apply_alignment_and_frame(pointcloud: PointCloud2) -> PointCloud2:
+            # Apply initial pose alignment if configured
+            if self._computed_init_tf is not None:
+                pointcloud = pointcloud.transform(self._computed_init_tf)
+            
+            # Apply frame namespace
+            pointcloud.frame_id = self._robot_frame(pointcloud.frame_id)
+            return pointcloud
+
+        return self._raw.lidar_stream().pipe(ops.map(apply_alignment_and_frame))
+
+    @simple_mcache
+    def odom_stream(self) -> Observable:  # type: ignore[type-arg]
+        def apply_alignment_and_frame(odom: PoseStamped) -> PoseStamped:
+            # Compute initial alignment on first odom
+            if self._cfg.navigation_enable_initial_alignment:
+                if self._last_map_pose is not None and self._computed_init_tf is None:
+                    odom_tf = Transform(
+                        translation=odom.position,
+                        rotation=odom.orientation,
+                        frame_id="odom_start",
+                        child_frame_id=self._robot_frame("base_link"),
+                    )
+                    self._computed_init_tf = self._last_map_pose + odom_tf.inverse()
+                    logger.info(
+                        f"Anchored odom to {self._cfg.navigation_alignment_frame}: "
+                        f"x={self._computed_init_tf.translation.x:.3f}, "
+                        f"y={self._computed_init_tf.translation.y:.3f}"
+                    )
+                
+                # Apply alignment transform
+                if self._computed_init_tf is not None:
+                    odom_tf = Transform(
+                        translation=odom.position,
+                        rotation=odom.orientation,
+                        frame_id="odom_start",
+                        child_frame_id=self._robot_frame("base_link"),
+                    )
+                    combined = self._computed_init_tf + odom_tf
+                    odom.position = combined.translation
+                    odom.orientation = combined.rotation
+                    odom.frame_id = self._cfg.navigation_alignment_frame
+                    return odom
+            
+            # Just apply frame namespace without alignment
+            odom.frame_id = self._robot_frame(odom.frame_id)
+            return odom
+
+        return self._raw.odom_stream().pipe(ops.map(apply_alignment_and_frame))
+
+    @simple_mcache
+    def video_stream(self) -> Observable:  # type: ignore[type-arg]
+        def apply_frame(image: Image) -> Image:
+            image.frame_id = self._robot_frame(image.frame_id)
+            return image
+
+        return self._raw.video_stream().pipe(ops.map(apply_frame))
 
 
 class ReplayConnection(UnitreeWebRTCConnection):
@@ -222,11 +396,12 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     camera_info: Out[CameraInfo]
 
     connection: Go2ConnectionProtocol
-    camera_info_static: CameraInfo = _camera_info_static()
+    camera_info_static: CameraInfo
     _global_config: GlobalConfig
     _camera_info_thread: Thread | None = None
     _camera_info_stop: Event
     _latest_video_frame: Image | None = None
+    _frame_prefix: str | None = None
 
     @classmethod
     def rerun_views(cls):  # type: ignore[no-untyped-def]
@@ -246,6 +421,14 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         **kwargs,
     ) -> None:
         self._global_config = cfg
+        
+        # Compute frame namespace prefix
+        if cfg.robot_frame_namespace:
+            self._frame_prefix = cfg.robot_frame_namespace
+        elif cfg.robot_id:
+            self._frame_prefix = cfg.robot_id
+        else:
+            self._frame_prefix = None
 
         ros_env_namespace = kwargs.pop("ros_env_namespace", None)
         ros_robot_namespace = kwargs.pop("ros_robot_namespace", None)
@@ -269,6 +452,10 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             ros_cmd_vel_topic=ros_cmd_vel_topic,
         )
         self._camera_info_stop = Event()
+        
+        # Create camera_info with appropriate frame_id
+        self.camera_info_static = _camera_info_static()
+        self.camera_info_static.frame_id = self._robot_frame("camera_optical")
 
         Module.__init__(self, *args, **kwargs)
 
@@ -327,26 +514,32 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
 
         super().stop()
 
+    def _robot_frame(self, base_name: str) -> str:
+        """Apply namespace prefix to robot-local frame names."""
+        if self._frame_prefix and base_name not in ("map", "world"):
+            return f"{self._frame_prefix}/{base_name}"
+        return base_name
+
     @classmethod
-    def _odom_to_tf(cls, odom: PoseStamped) -> list[Transform]:
+    def _odom_to_tf(self, odom: PoseStamped) -> list[Transform]:
         camera_link = Transform(
             translation=Vector3(0.3, 0.0, 0.0),
             rotation=Quaternion(0.0, 0.0, 0.0, 1.0),
-            frame_id="base_link",
-            child_frame_id="camera_link",
+            frame_id=self._robot_frame("base_link"),
+            child_frame_id=self._robot_frame("camera_link"),
             ts=odom.ts,
         )
 
         camera_optical = Transform(
             translation=Vector3(0.0, 0.0, 0.0),
             rotation=Quaternion(-0.5, 0.5, -0.5, 0.5),
-            frame_id="camera_link",
-            child_frame_id="camera_optical",
+            frame_id=self._robot_frame("camera_link"),
+            child_frame_id=self._robot_frame("camera_optical"),
             ts=odom.ts,
         )
 
         return [
-            Transform.from_pose("base_link", odom),
+            Transform.from_pose(self._robot_frame("base_link"), odom),
             camera_link,
             camera_optical,
         ]

@@ -57,6 +57,18 @@ class GlobalConfig(BaseSettings):
     dtop: bool = False
     obstacle_avoidance: bool = True
     detection_model: VlModelName = "moondream"
+    
+    # Robot identity and frame namespace (optional)
+    robot_id: str | None = None
+    robot_frame_namespace: str | None = None
+    
+    # Initial pose alignment (optional)
+    navigation_initial_pose_path: str | None = None
+    navigation_initial_x: float | None = None
+    navigation_initial_y: float | None = None
+    navigation_initial_yaw: float | None = None
+    navigation_enable_initial_alignment: bool = False
+    navigation_alignment_frame: str = "map"
 
     model_config = SettingsConfigDict(
         env_file=".env",

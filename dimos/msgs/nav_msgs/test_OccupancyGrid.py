@@ -97,6 +97,58 @@ def test_world_grid_coordinate_conversion() -> None:
     assert world_pos.y == 2.25
 
 
+def test_rotated_origin_coordinate_conversion() -> None:
+    """Test coordinate conversion with rotated origin (yaw != 0)."""
+    import math
+    from dimos.msgs.geometry_msgs import Quaternion, Vector3
+
+    data = np.zeros((20, 30), dtype=np.int8)
+    
+    # Test with 90 degree rotation (pi/2 radians)
+    yaw_90 = math.pi / 2
+    origin_90 = Pose(
+        position=Vector3(1.0, 2.0, 0.0),
+        orientation=Quaternion.from_euler(Vector3(0.0, 0.0, yaw_90))
+    )
+    grid_90 = OccupancyGrid(grid=data, resolution=0.1, origin=origin_90, frame_id="map")
+
+    # Test round-trip conversion
+    test_world_point = Vector3(3.0, 4.0, 0.0)
+    grid_point = grid_90.world_to_grid(test_world_point)
+    world_point_back = grid_90.grid_to_world(grid_point)
+    
+    # Should recover original world point (within floating point tolerance)
+    assert abs(world_point_back.x - test_world_point.x) < 1e-6
+    assert abs(world_point_back.y - test_world_point.y) < 1e-6
+
+    # Test with -90 degree rotation
+    yaw_neg90 = -math.pi / 2
+    origin_neg90 = Pose(
+        position=Vector3(0.0, 0.0, 0.0),
+        orientation=Quaternion.from_euler(Vector3(0.0, 0.0, yaw_neg90))
+    )
+    grid_neg90 = OccupancyGrid(grid=data, resolution=0.1, origin=origin_neg90, frame_id="map")
+
+    # Test another round-trip
+    test_point_2 = Vector3(1.0, 1.0, 0.0)
+    grid_pt_2 = grid_neg90.world_to_grid(test_point_2)
+    world_pt_2 = grid_neg90.grid_to_world(grid_pt_2)
+    
+    assert abs(world_pt_2.x - test_point_2.x) < 1e-6
+    assert abs(world_pt_2.y - test_point_2.y) < 1e-6
+
+    # Test cell_value with rotated origin
+    # Set a value at grid coordinate (5, 5)
+    grid_90.grid[5, 5] = 100
+    
+    # Convert that grid cell to world coordinates
+    world_pos_of_cell = grid_90.grid_to_world((5, 5))
+    
+    # Reading back that world position should return the same cell value
+    cell_val = grid_90.cell_value(world_pos_of_cell)
+    assert cell_val == 100
+
+
 def test_lcm_encode_decode() -> None:
     """Test LCM encoding and decoding."""
     data = np.zeros((20, 30), dtype=np.int8)
