@@ -29,6 +29,10 @@ ahead of time.
 DEFAULT_CAPACITY_COLOR_IMAGE = 1920 * 1080 * 3
 # Default depth image size: 1280x720 frame * 4 (float32 size)
 DEFAULT_CAPACITY_DEPTH_IMAGE = 1280 * 720 * 4
+# PointCloud2 payloads can easily exceed the image defaults once pickled.
+DEFAULT_CAPACITY_POINTCLOUD = 32 * 1024 * 1024
+# Large occupancy grids are smaller than pointclouds, but still benefit from a larger default.
+DEFAULT_CAPACITY_OCCUPANCY_GRID = 8 * 1024 * 1024
 
 # From https://github.com/lcm-proj/lcm.git
 LCM_MAX_CHANNEL_NAME_LENGTH = 63

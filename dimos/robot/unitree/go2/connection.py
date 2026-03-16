@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from threading import Thread
+from threading import Event, Thread
 import time
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -85,18 +85,58 @@ def _camera_info_static() -> CameraInfo:
 
 
 def make_connection(ip: str | None, cfg: GlobalConfig) -> Go2ConnectionProtocol:
+    return _make_connection(ip, cfg)
+
+
+def _make_connection(
+    ip: str | None,
+    cfg: GlobalConfig,
+    *,
+    ros_env_namespace: str | None = None,
+    ros_robot_namespace: str | None = None,
+    ros_pointcloud_topic: str | None = None,
+    ros_odom_topic: str | None = None,
+    ros_image_topic: str | None = None,
+    ros_cmd_vel_topic: str | None = None,
+) -> Go2ConnectionProtocol:
     connection_type = cfg.unitree_connection_type
 
     if ip in ("fake", "mock", "replay") or connection_type == "replay":
         dataset = cfg.replay_dir
         return ReplayConnection(dataset=dataset)
-    elif ip == "mujoco" or connection_type == "mujoco":
+    if ip == "mujoco" or connection_type == "mujoco":
         from dimos.robot.unitree.mujoco_connection import MujocoConnection
 
         return MujocoConnection(cfg)
-    else:
+    if ip in ("ros", "ros2") or connection_type == "ros":
+        ros_connection_kwargs: dict[str, str] = {}
+        if ros_env_namespace is not None:
+            ros_connection_kwargs["ros_env_namespace"] = ros_env_namespace
+        if ros_robot_namespace is not None:
+            ros_connection_kwargs["ros_robot_namespace"] = ros_robot_namespace
+        if ros_pointcloud_topic is not None:
+            ros_connection_kwargs["lidar_topic"] = ros_pointcloud_topic
+        if ros_odom_topic is not None:
+            ros_connection_kwargs["odom_topic"] = ros_odom_topic
+        if ros_image_topic is not None:
+            ros_connection_kwargs["image_topic"] = ros_image_topic
+        if ros_cmd_vel_topic is not None:
+            ros_connection_kwargs["cmd_vel_topic"] = ros_cmd_vel_topic
+        return ROSSimConnection(**ros_connection_kwargs)
+    if connection_type == "webrtc-rs":
+        try:
+            from dimos.robot.unitree.connection_rs import UnitreeWebRTCRSConnection
+        except ImportError as error:
+            raise ImportError(
+                "unitree-webrtc-rs backend selected, but the package is not installed. "
+                "Install `dimos[unitree]` or `unitree-webrtc-rs`."
+            ) from error
+
         assert ip is not None, "IP address must be provided"
-        return UnitreeWebRTCConnection(ip)
+        return UnitreeWebRTCRSConnection(ip)
+
+    assert ip is not None, "IP address must be provided"
+    return UnitreeWebRTCConnection(ip)
 
 
 class ReplayConnection(UnitreeWebRTCConnection):
@@ -185,6 +225,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     camera_info_static: CameraInfo = _camera_info_static()
     _global_config: GlobalConfig
     _camera_info_thread: Thread | None = None
+    _camera_info_stop: Event
     _latest_video_frame: Image | None = None
 
     @classmethod
@@ -217,18 +258,17 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         ros_cmd_vel_topic = kwargs.pop("ros_cmd_vel_topic", None)
 
         ip = ip if ip is not None else self._global_config.robot_ip
-
-        connection_type = self._global_config.unitree_connection_type
-
-        if ip in ["fake", "mock", "replay"] or connection_type == "replay":
-            self.connection = ReplayConnection()
-        elif ip == "mujoco" or connection_type == "mujoco":
-            from dimos.robot.unitree.mujoco_connection import MujocoConnection
-
-            self.connection = MujocoConnection(self._global_config)
-        else:
-            assert ip is not None, "IP address must be provided"
-            self.connection = UnitreeWebRTCConnection(ip)
+        self.connection = _make_connection(
+            ip,
+            self._global_config,
+            ros_env_namespace=ros_env_namespace,
+            ros_robot_namespace=ros_robot_namespace,
+            ros_pointcloud_topic=ros_pointcloud_topic,
+            ros_odom_topic=ros_odom_topic,
+            ros_image_topic=ros_image_topic,
+            ros_cmd_vel_topic=ros_cmd_vel_topic,
+        )
+        self._camera_info_stop = Event()
 
         Module.__init__(self, *args, **kwargs)
 
@@ -260,6 +300,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
         self._disposables.add(self.connection.video_stream().subscribe(onimage))
         self._disposables.add(Disposable(self.cmd_vel.subscribe(self.move)))
 
+        self._camera_info_stop.clear()
         self._camera_info_thread = Thread(
             target=self.publish_camera_info,
             daemon=True,
@@ -276,6 +317,7 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     @rpc
     def stop(self) -> None:
         self.liedown()
+        self._camera_info_stop.set()
 
         if self.connection:
             self.connection.stop()
@@ -316,9 +358,9 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
             self.odom.publish(msg)
 
     def publish_camera_info(self) -> None:
-        while True:
+        while not self._camera_info_stop.is_set():
             self.camera_info.publish(self.camera_info_static)
-            time.sleep(1.0)
+            self._camera_info_stop.wait(1.0)
 
     @rpc
     def move(self, twist: Twist, duration: float = 0.0) -> bool:
@@ -360,12 +402,15 @@ go2_connection = GO2Connection.blueprint
 
 
 def deploy(dimos: ModuleCoordinator, ip: str, prefix: str = "") -> "ModuleProxy":
-    from dimos.constants import DEFAULT_CAPACITY_COLOR_IMAGE
+    from dimos.constants import (
+        DEFAULT_CAPACITY_COLOR_IMAGE,
+        DEFAULT_CAPACITY_POINTCLOUD,
+    )
 
     connection = dimos.deploy(GO2Connection, ip)  # type: ignore[attr-defined]
 
-    connection.pointcloud.transport = pSHMTransport(
-        f"{prefix}/lidar", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE
+    connection.lidar.transport = pSHMTransport(
+        f"{prefix}/lidar", default_capacity=DEFAULT_CAPACITY_POINTCLOUD
     )
     connection.color_image.transport = pSHMTransport(
         f"{prefix}/image", default_capacity=DEFAULT_CAPACITY_COLOR_IMAGE

@@ -132,8 +132,8 @@ class VoxelGridMapper(Module):
         if hasattr(frame, "ts") and frame.ts:
             self._latest_frame_ts = frame.ts
 
-        # we are potentially moving into CUDA here
-        pcd = ensure_tensor_pcd(frame.pointcloud, self._dev)
+        # Stay on the tensor path so lidar ingest does not round-trip through legacy Open3D.
+        pcd = ensure_tensor_pcd(frame.pointcloud_tensor, self._dev)
 
         if pcd.is_empty():
             return
@@ -195,8 +195,7 @@ class VoxelGridMapper(Module):
     @simple_mcache
     def get_global_pointcloud2(self) -> PointCloud2:
         return PointCloud2(
-            # we are potentially moving out of CUDA here
-            ensure_legacy_pcd(self.get_global_pointcloud()),
+            self.get_global_pointcloud(),
             frame_id=self.frame_id,
             ts=self._latest_frame_ts if self._latest_frame_ts else time.time(),
         )
@@ -232,19 +231,5 @@ def ensure_tensor_pcd(
     pcd_t = o3d.t.geometry.PointCloud(device=device)
     pcd_t.point["positions"] = o3c.Tensor(pts, o3c.float32, device)
     return pcd_t
-
-
-def ensure_legacy_pcd(
-    pcd_any: o3d.t.geometry.PointCloud | o3d.geometry.PointCloud,
-) -> o3d.geometry.PointCloud:
-    if isinstance(pcd_any, o3d.geometry.PointCloud):
-        return pcd_any
-
-    assert isinstance(pcd_any, o3d.t.geometry.PointCloud), (
-        "Input must be a legacy PointCloud or a tensor PointCloud"
-    )
-
-    return pcd_any.to_legacy()
-
 
 voxel_mapper = VoxelGridMapper.blueprint
