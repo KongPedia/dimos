@@ -77,3 +77,6 @@ CLAUDE.MD
 htmlcov/
 .coverage
 .coverage.*
+
+# Maps directory (should be tracked in main repo, not submodule)
+maps/
