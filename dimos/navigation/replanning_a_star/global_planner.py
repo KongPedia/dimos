@@ -23,6 +23,7 @@ from reactivex.disposable import CompositeDisposable
 from dimos.core.global_config import GlobalConfig
 from dimos.core.resource import Resource
 from dimos.mapping.occupancy.path_resampling import smooth_resample_path
+from dimos.spec.localization_spec import LocalizationSpec
 from dimos.msgs.geometry_msgs import Twist
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
@@ -60,6 +61,7 @@ class GlobalPlanner(Resource):
     _replan_event: Event
     _replan_reason: StopMessage | None
     _lock: RLock
+    _localization: LocalizationSpec | None = None
 
     _safe_goal_tolerance: float = 4.0
     _goal_tolerance: float = 0.2
@@ -69,7 +71,7 @@ class GlobalPlanner(Resource):
     _stuck_time_window: float = 8.0
     _max_path_deviation: float = 0.9
 
-    def __init__(self, global_config: GlobalConfig) -> None:
+    def __init__(self, global_config: GlobalConfig, localization: LocalizationSpec | None = None) -> None:
         self.path = Subject()
         self.goal_reached = Subject()
 
@@ -85,6 +87,7 @@ class GlobalPlanner(Resource):
         self._replan_event = Event()
         self._replan_reason = None
         self._lock = RLock()
+        self._localization = localization
 
     def start(self) -> None:
         self._local_planner.start()
@@ -287,6 +290,18 @@ class GlobalPlanner(Resource):
         if current_odom is None:
             logger.warning("Cannot handle goal request: missing odometry.")
             return
+
+        if self._localization is not None:
+            try:
+                loc_state = self._localization.get_state()
+                if loc_state in ("lost", "recovering"):
+                    logger.warning(
+                        "Deferring path planning due to uncertain localization",
+                        localization_state=loc_state,
+                    )
+                    return
+            except Exception as e:
+                logger.debug("Failed to query localization state", error=str(e))
 
         safe_goal = self._find_safe_goal(current_goal.position)
 

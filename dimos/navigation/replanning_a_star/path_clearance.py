@@ -21,6 +21,9 @@ from dimos.core.global_config import GlobalConfig
 from dimos.mapping.occupancy.path_mask import make_path_mask
 from dimos.msgs.nav_msgs import Path
 from dimos.msgs.nav_msgs.OccupancyGrid import CostValues, OccupancyGrid
+from dimos.utils.logging_config import setup_logger
+
+logger = setup_logger()
 
 
 class PathClearance:
@@ -86,7 +89,11 @@ class PathClearance:
         if costmap is None:
             return True
 
-        return bool(np.any(costmap.grid[self.mask] == CostValues.OCCUPIED))
+        try:
+            return bool(np.any(costmap.grid[self.mask] == CostValues.OCCUPIED))
+        except ValueError as error:
+            logger.warning("Path clearance validation failed, treating as obstacle ahead", error=str(error))
+            return True
 
     def _pose_distance(self, index1: int, index2: int) -> float:
         p1 = self._path.poses[index1].position

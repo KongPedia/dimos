@@ -25,6 +25,7 @@ from dimos.msgs.geometry_msgs import PointStamped, PoseStamped, Twist
 from dimos.msgs.nav_msgs import OccupancyGrid, Path
 from dimos.navigation.base import NavigationInterface, NavigationState
 from dimos.navigation.replanning_a_star.global_planner import GlobalPlanner
+from dimos.spec.localization_spec import LocalizationSpec
 
 
 class ReplanningAStarPlanner(Module, NavigationInterface):
@@ -42,11 +43,12 @@ class ReplanningAStarPlanner(Module, NavigationInterface):
 
     _planner: GlobalPlanner
     _global_config: GlobalConfig
+    _localization: LocalizationSpec | None = None
 
     def __init__(self, cfg: GlobalConfig = global_config) -> None:
         super().__init__()
         self._global_config = cfg
-        self._planner = GlobalPlanner(self._global_config)
+        self._planner = GlobalPlanner(self._global_config, localization=self._localization)
 
     @rpc
     def start(self) -> None:

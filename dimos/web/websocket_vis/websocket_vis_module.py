@@ -362,17 +362,17 @@ class WebsocketVisModule(Module):
         self._uvicorn_server.run()
 
     def _on_robot_pose(self, msg: PoseStamped) -> None:
-        pose_data = {"type": "vector", "c": [msg.position.x, msg.position.y, msg.position.z]}
+        pose_data = {"type": "vector", "c": [float(msg.position.x), float(msg.position.y), float(msg.position.z)]}
         self.vis_state["robot_pose"] = pose_data
         self._emit("robot_pose", pose_data)
 
     def _on_gps_location(self, msg: LatLon) -> None:
-        pose_data = {"lat": msg.lat, "lon": msg.lon}
+        pose_data = {"lat": float(msg.lat), "lon": float(msg.lon)}
         self.vis_state["gps_location"] = pose_data
         self._emit("gps_location", pose_data)
 
     def _on_path(self, msg: Path) -> None:
-        points = [[pose.position.x, pose.position.y] for pose in msg.poses]
+        points = [[float(pose.position.x), float(pose.position.y)] for pose in msg.poses]
         path_data = {"type": "path", "points": points}
         self.vis_state["path"] = path_data
         self._emit("path", path_data)

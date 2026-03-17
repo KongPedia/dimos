@@ -1,0 +1,10 @@
+free_thresh: 0.25
+image: lit5f.png
+mode: trinary
+negate: 0
+occupied_thresh: 0.65
+origin:
+- -6.925000190734863
+- -17.275001525878906
+- 0.0
+resolution: 0.05
