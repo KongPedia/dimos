@@ -29,6 +29,7 @@ from numpy.typing import NDArray
 import open3d as o3d  # type: ignore[import-untyped]
 
 from dimos.core.global_config import GlobalConfig
+from dimos.msgs.geometry_msgs import Quaternion, Vector3
 from dimos.msgs.sensor_msgs import PointCloud2
 from dimos.simulation.mujoco.constants import (
     DEPTH_CAMERA_FOV,
@@ -90,9 +91,18 @@ def _run_simulation(config: GlobalConfig, shm: ShmReader) -> None:
         case _:
             z = 0
 
-    pos = config.mujoco_start_pos_float
+    spawn_x = config.mujoco_spawn_x if config.mujoco_spawn_x is not None else config.mujoco_start_pos_float[0]
+    spawn_y = config.mujoco_spawn_y if config.mujoco_spawn_y is not None else config.mujoco_start_pos_float[1]
+    spawn_yaw = config.mujoco_spawn_yaw if config.mujoco_spawn_yaw is not None else config.mujoco_start_yaw
+    start_orientation = Quaternion.from_euler(Vector3(0.0, 0.0, spawn_yaw))
 
-    data.qpos[0:3] = [pos[0], pos[1], z]
+    data.qpos[0:3] = [spawn_x, spawn_y, z]
+    data.qpos[3:7] = [
+        start_orientation.w,
+        start_orientation.x,
+        start_orientation.y,
+        start_orientation.z,
+    ]
 
     mujoco.mj_forward(model, data)
 

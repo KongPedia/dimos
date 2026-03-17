@@ -49,7 +49,7 @@ class PoseStamped(Pose, Timestamped):
     frame_id: str
 
     @dispatch
-    def __init__(self, ts: float = 0.0, frame_id: str = "", **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, ts: "float" = 0.0, frame_id: "str" = "", **kwargs) -> None:  # type: ignore[no-untyped-def]
         self.frame_id = frame_id
         self.ts = ts if ts != 0 else time.time()
         super().__init__(**kwargs)

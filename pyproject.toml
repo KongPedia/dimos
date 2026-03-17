@@ -154,7 +154,7 @@ web = [
 perception = [
     "ultralytics>=8.3.70",
     "filterpy>=1.4.5",
-    "Pillow<10",
+    "Pillow",
     "lap>=0.5.12",
     "transformers[torch]==4.49.0",
     "moondream",

@@ -46,8 +46,9 @@ from dimos.constants import (
 )
 from dimos.core.blueprints import autoconnect
 from dimos.core.transport import pSHMTransport
-from dimos.mapping.costmapper import cost_mapper
-from dimos.mapping.pointclouds.occupancy import HeightCostConfig
+from dimos.localization import LocalizationModule, localization_module
+from dimos.mapping.costmapper import CostMapper, cost_mapper
+from dimos.mapping.pointclouds.occupancy import GeneralOccupancyConfig
 from dimos.mapping.voxels import voxel_mapper
 from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Vector3
 from dimos.msgs.nav_msgs import OccupancyGrid
@@ -60,6 +61,7 @@ from dimos.navigation.replanning_a_star.module import (
     ReplanningAStarPlanner,
     replanning_a_star_planner,
 )
+from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule, websocket_vis
 from dimos.protocol import pubsub
 from dimos.robot.unitree.go2.connection import GO2Connection, go2_connection
 from unitree_webrtc_connect.constants import RTC_TOPIC
@@ -137,7 +139,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Worker memory limit hint",
     )
     parser.add_argument("--planner-robot-speed", type=float, default=None)
-    parser.add_argument("--navigation-voxel-size", type=float, default=0.2)
+    parser.add_argument("--navigation-voxel-size", type=float, default=0.05)
     parser.add_argument(
         "--map-publish-interval",
         type=float,
@@ -147,7 +149,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--costmap-update-interval",
         type=float,
-        default=0.2,
+        default=0.1,
         help="Seconds between costmap updates (0 = every map update)",
     )
     parser.add_argument("--goal-timeout", type=float, default=15.0)
@@ -156,6 +158,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mqtt-broker", type=str, default=None, help="MQTT broker host (enables MQTT mode)")
     parser.add_argument("--mqtt-port", type=int, default=1883, help="MQTT broker port")
     parser.add_argument("--robot-id", type=str, default="go2_02", help="Robot ID for MQTT topics")
+    parser.add_argument("--map-path", type=str, default=None, help="Path to saved map (yaml/png/npy) for localization")
+    parser.add_argument(
+        "--use-saved-map-as-global-costmap",
+        action="store_true",
+        help="Use --map-path occupancy as planner/web global_costmap instead of live LiDAR-built costmap",
+    )
+    parser.add_argument("--enable-localization", action="store_true", help="Enable localization against saved map")
+    parser.add_argument("--initial-pose-x", type=float, default=0.0, help="Initial X position for localization")
+    parser.add_argument("--initial-pose-y", type=float, default=0.0, help="Initial Y position for localization")
+    parser.add_argument("--initial-pose-yaw", type=float, default=0.0, help="Initial yaw for localization (radians)")
+    parser.add_argument("--mujoco-spawn-x", type=float, default=None, help="MuJoCo spawn X (overrides initial-pose-x for sim spawn)")
+    parser.add_argument("--mujoco-spawn-y", type=float, default=None, help="MuJoCo spawn Y (overrides initial-pose-y for sim spawn)")
+    parser.add_argument("--mujoco-spawn-yaw", type=float, default=None, help="MuJoCo spawn yaw (overrides initial-pose-yaw for sim spawn)")
     return parser
 
 
@@ -165,6 +180,8 @@ def _print_help() -> None:
     print("  explore start              # start frontier exploration")
     print("  explore stop               # stop frontier exploration")
     print("  explore status             # print exploration status")
+    print("  save_map <path>            # save latest global costmap to yaml/png/npy")
+    print("  localization               # print localization state")
     print("  state                      # print planner state")
     print("  cancel                     # cancel current goal")
     print("  recovery                   # run recovery stand (unlock robot)")
@@ -235,6 +252,33 @@ def _handle_robot_command(parts: list[str], connection: GO2Connection) -> None:
         return
 
 
+def _handle_save_map_command(parts: list[str], costmapper: CostMapper | None) -> None:
+    if len(parts) != 2:
+        print("usage: save_map <path>")
+        return
+
+    if costmapper is None:
+        print("save_map unavailable: CostMapper instance not found")
+        return
+
+    path = parts[1]
+    if not costmapper.has_latest_costmap():
+        print("No latest costmap available yet. Move the robot or wait for mapping to update.")
+        return
+
+    saved = costmapper.save_latest_costmap(path)
+    print(f"save_map success={saved} path={path}")
+
+
+def _handle_localization_command(localization: LocalizationModule | None) -> None:
+    if localization is None:
+        print("localization unavailable: module not enabled")
+        return
+
+    print(f"localization state={localization.get_state()}")
+    print(f"localization match_score={localization.get_match_score():.3f}")
+
+
 def _mqtt_listener(
     broker_host: str,
     broker_port: int,
@@ -293,6 +337,8 @@ def _dispatch_command(
     navigator: ReplanningAStarPlanner,
     explorer: WavefrontFrontierExplorer,
     connection: GO2Connection,
+    costmapper: CostMapper | None,
+    localization: LocalizationModule | None,
 ) -> bool:
     cmd = parts[0].lower()
     if cmd in {"quit", "exit"}:
@@ -314,6 +360,14 @@ def _dispatch_command(
         _handle_robot_command(parts, connection)
         return True
 
+    if cmd == "save_map":
+        _handle_save_map_command(parts, costmapper)
+        return True
+
+    if cmd == "localization":
+        _handle_localization_command(localization)
+        return True
+
     if cmd == "state":
         print(f"planner state={navigator.get_state()}")
         print(f"goal reached={navigator.is_goal_reached()}")
@@ -333,8 +387,8 @@ def main() -> None:
 
     voxel_device = _resolve_voxel_device(args.voxel_device)
 
-    # Same stack as `dimos run unitree-go2`, but headless (no UI module).
-    blueprint = autoconnect(
+    # Build module list
+    modules = [
         go2_connection(),
         voxel_mapper(
             voxel_size=args.navigation_voxel_size,
@@ -342,19 +396,57 @@ def main() -> None:
             publish_interval=args.map_publish_interval,
         ),
         cost_mapper(
-            config=HeightCostConfig(use_float64=False),
+            algo="general",
+            config=GeneralOccupancyConfig(use_float64=False),
             update_interval=args.costmap_update_interval,
         ),
+    ]
+
+    # Add localization if enabled
+    if args.enable_localization or args.map_path:
+        modules.append(localization_module())
+
+    modules.extend([
         replanning_a_star_planner(),
         wavefront_frontier_explorer(goal_timeout=args.goal_timeout),
-    ).transports(JETSON_TRANSPORTS).global_config(
+        websocket_vis(),
+    ])
+
+    # Same stack as `dimos run unitree-go2`, but headless (no UI module).
+    blueprint = autoconnect(*modules).transports(JETSON_TRANSPORTS)
+
+    if args.enable_localization or args.map_path:
+        blueprint = blueprint.remappings(
+            [
+                (ReplanningAStarPlanner, "odom", "corrected_pose"),
+                (WavefrontFrontierExplorer, "odom", "corrected_pose"),
+                (WebsocketVisModule, "odom", "corrected_pose"),
+            ]
+        )
+
+    blueprint = blueprint.global_config(
         robot_ip=args.robot_ip,
         unitree_connection=args.unitree_connection,
-        viewer="none",
+        viewer="rerun-web",
         n_workers=args.n_workers,
         memory_limit=args.memory_limit,
         planner_robot_speed=args.planner_robot_speed,
         robot_model="unitree_go2",
+        simulation=True,
+        mujoco_steps_per_frame=4,
+        mujoco_start_pos=f"{args.initial_pose_x}, {args.initial_pose_y}",
+        mujoco_start_yaw=args.initial_pose_yaw,
+        mujoco_spawn_x=args.mujoco_spawn_x,
+        mujoco_spawn_y=args.mujoco_spawn_y,
+        mujoco_spawn_yaw=args.mujoco_spawn_yaw,
+        map_path=args.map_path,
+        mujoco_global_costmap_from_occupancy=(
+            args.map_path if args.use_saved_map_as_global_costmap else None
+        ),
+        enable_localization=args.enable_localization,
+        initial_pose_x=args.initial_pose_x,
+        initial_pose_y=args.initial_pose_y,
+        initial_pose_yaw=args.initial_pose_yaw,
     )
 
     pubsub.lcm.autoconf()  # type: ignore[attr-defined]
@@ -363,6 +455,8 @@ def main() -> None:
     navigator = coordinator.get_instance(ReplanningAStarPlanner)
     explorer = coordinator.get_instance(WavefrontFrontierExplorer)
     connection = coordinator.get_instance(GO2Connection)
+    costmapper = coordinator.get_instance(CostMapper)
+    localization = coordinator.get_instance(LocalizationModule)
 
     assert navigator is not None
     assert explorer is not None
@@ -370,6 +464,13 @@ def main() -> None:
 
     print("Headless Go2 navigation is running.")
     print(f"robot_ip={args.robot_ip}, voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}")
+    if args.map_path:
+        print(f"map_path={args.map_path}")
+        print("saved occupancy map reference enabled for localization")
+    if args.use_saved_map_as_global_costmap and args.map_path:
+        print("saved occupancy map preload enabled for planner/web global_costmap")
+    if localization is not None:
+        print("localization module enabled")
 
     # Start MQTT listener if broker is specified
     mqtt_thread = None
@@ -414,7 +515,14 @@ def main() -> None:
                 continue
 
             parts = raw.split()
-            if not _dispatch_command(parts, navigator, explorer, connection):
+            if not _dispatch_command(
+                parts,
+                navigator,
+                explorer,
+                connection,
+                costmapper,
+                localization,
+            ):
                 break
 
     except KeyboardInterrupt:

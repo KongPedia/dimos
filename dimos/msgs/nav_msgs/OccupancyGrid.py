@@ -264,6 +264,104 @@ class OccupancyGrid(Timestamped):
             case _:
                 raise NotImplementedError(f"Unsupported file format: {path.suffix}")
 
+    def to_path(
+        self,
+        path: Path,
+        mode: str = "trinary",
+        negate: int = 0,
+        occupied_thresh: float = 0.65,
+        free_thresh: float = 0.25,
+    ) -> None:
+        """Save OccupancyGrid to disk in Nav2-compatible format.
+
+        Args:
+            path: Output path. Extension determines format (.yaml/.yml, .png, .pgm, .npy)
+            mode: Map mode for yaml output (trinary, scale, raw)
+            negate: Whether to negate occupancy values in image (0 or 1)
+            occupied_thresh: Threshold for occupied cells (0.0-1.0)
+            free_thresh: Threshold for free cells (0.0-1.0)
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        match path.suffix.lower():
+            case ".npy":
+                np.save(path, self.grid)
+
+            case ".png" | ".pgm":
+                # Convert grid to image format
+                image_u8 = self._grid_to_image(negate)
+                # Flip vertically to match ROS map_server convention
+                image_u8 = np.flipud(image_u8)
+                Image.fromarray(image_u8, mode="L").save(path)
+
+            case ".yaml" | ".yml":
+                try:
+                    import yaml  # type: ignore[import-untyped]
+                except ImportError as e:
+                    raise ImportError("PyYAML is required to save nav2 map YAML files") from e
+
+                # Save image file alongside yaml
+                image_name = path.stem + ".png"
+                image_path = path.parent / image_name
+
+                # Save image
+                image_u8 = self._grid_to_image(negate)
+                image_u8 = np.flipud(image_u8)
+                Image.fromarray(image_u8, mode="L").save(image_path)
+
+                # Extract origin yaw from quaternion
+                origin_yaw = self.origin.orientation.to_euler().z
+
+                # Build yaml config
+                config = {
+                    "image": image_name,
+                    "resolution": float(self.resolution),
+                    "origin": [
+                        float(self.origin.position.x),
+                        float(self.origin.position.y),
+                        float(origin_yaw),
+                    ],
+                    "negate": negate,
+                    "occupied_thresh": occupied_thresh,
+                    "free_thresh": free_thresh,
+                    "mode": mode,
+                }
+
+                with open(path, "w") as f:
+                    yaml.safe_dump(config, f, default_flow_style=False)
+
+            case _:
+                raise NotImplementedError(f"Unsupported save format: {path.suffix}")
+
+    def _grid_to_image(self, negate: int = 0) -> NDArray[np.uint8]:
+        """Convert occupancy grid to grayscale image.
+
+        Args:
+            negate: If 1, free=white and occupied=black. If 0, free=black and occupied=white.
+
+        Returns:
+            uint8 grayscale image array
+        """
+        image = np.full(self.grid.shape, 205, dtype=np.uint8)
+
+        # Free cells
+        free_mask = self.grid == CostValues.FREE
+        image[free_mask] = 0 if negate else 254
+
+        # Occupied cells (1-100)
+        occupied_mask = (self.grid > 0) & (self.grid <= 100)
+        if np.any(occupied_mask):
+            # Scale 1-100 to grayscale
+            occ_values = self.grid[occupied_mask].astype(np.float32)
+            if negate:
+                scaled = occ_values / 100.0 * 254
+            else:
+                scaled = 254 - (occ_values / 100.0 * 254)
+            image[occupied_mask] = scaled.astype(np.uint8)
+
+        return image
+
     def world_to_grid(self, point: VectorLike) -> Vector3:
         """Convert world coordinates to grid coordinates.
 

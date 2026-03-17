@@ -46,6 +46,10 @@ class GlobalConfig(BaseSettings):
     mujoco_global_costmap_from_occupancy: str | None = None
     mujoco_global_map_from_pointcloud: str | None = None
     mujoco_start_pos: str = "-1.0, 1.0"
+    mujoco_start_yaw: float = 0.0
+    mujoco_spawn_x: float | None = None
+    mujoco_spawn_y: float | None = None
+    mujoco_spawn_yaw: float | None = None
     mujoco_steps_per_frame: int = 7
     robot_model: str | None = None
     robot_width: float = 0.3
@@ -57,6 +61,15 @@ class GlobalConfig(BaseSettings):
     dtop: bool = False
     obstacle_avoidance: bool = True
     detection_model: VlModelName = "moondream"
+
+    # Localization settings
+    map_path: str | None = None
+    enable_localization: bool = False
+    initial_pose_x: float = 0.0
+    initial_pose_y: float = 0.0
+    initial_pose_yaw: float = 0.0
+    relocalization_interval: float = 2.0
+    localization_algorithm: Literal["scan_matching", "icp", "ndt"] = "scan_matching"
 
     model_config = SettingsConfigDict(
         env_file=".env",
