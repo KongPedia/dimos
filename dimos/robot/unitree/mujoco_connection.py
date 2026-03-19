@@ -232,6 +232,9 @@ class MujocoConnection:
     def balance_stand(self) -> bool:
         return True
 
+    def play_audio_file(self, path: str) -> bool:
+        return True
+
     def set_obstacle_avoidance(self, enabled: bool = True) -> None:
         pass
 

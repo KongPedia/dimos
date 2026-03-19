@@ -285,6 +285,9 @@ class ROSSimConnection(Resource):
         self._publish_stop()
         return True
 
+    def play_audio_file(self, path: str) -> bool:
+        return True
+
     def publish_request(self, topic: str, data: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": "unsupported",
