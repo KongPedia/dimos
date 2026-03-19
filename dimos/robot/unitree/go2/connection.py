@@ -62,6 +62,7 @@ class Go2ConnectionProtocol(Protocol):
     def standup(self) -> bool: ...
     def liedown(self) -> bool: ...
     def balance_stand(self) -> bool: ...
+    def play_audio_file(self, path: str) -> bool: ...
     def set_obstacle_avoidance(self, enabled: bool = True) -> None: ...
     def publish_request(self, topic: str, data: dict) -> dict: ...  # type: ignore[type-arg]
 
@@ -153,11 +154,15 @@ class ReplayConnection(UnitreeWebRTCConnection):
             "seek": kwargs.get("seek"),
             "duration": kwargs.get("duration"),
         }
+        self.stop_timer = None
 
     def connect(self) -> None:
         pass
 
     def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
         pass
 
     def standup(self) -> bool:
@@ -167,6 +172,9 @@ class ReplayConnection(UnitreeWebRTCConnection):
         return True
 
     def balance_stand(self) -> bool:
+        return True
+
+    def play_audio_file(self, path: str) -> bool:
         return True
 
     def set_obstacle_avoidance(self, enabled: bool = True) -> None:
@@ -376,6 +384,11 @@ class GO2Connection(Module, spec.Camera, spec.Pointcloud):
     def liedown(self) -> bool:
         """Make the robot lie down."""
         return self.connection.liedown()
+
+    @rpc
+    def play_audio_file(self, path: str) -> bool:
+        """Play an audio file through the robot audio bridge when supported."""
+        return self.connection.play_audio_file(path)
 
     @rpc
     def publish_request(self, topic: str, data: dict[str, Any]) -> dict[Any, Any]:

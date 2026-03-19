@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import threading
 import time
 from typing import Any, Callable, TypeAlias
@@ -44,6 +45,8 @@ from dimos.utils.decorators.decorators import simple_mcache
 from dimos.utils.reactive import backpressure, callback_to_observable
 
 VideoMessage: TypeAlias = NDArray[np.uint8]
+
+logger = logging.getLogger(__name__)
 
 
 class UnitreeWebRTCRSConnection(Resource):
@@ -225,6 +228,14 @@ class UnitreeWebRTCRSConnection(Resource):
             lambda: self.conn.datachannel.pub_sub.publish_request_new(topic, data)
         )
 
+    def play_audio_file(self, path: str) -> bool:
+        try:
+            self._run_coro(self.conn.audio.play_from_file(path))
+            return True
+        except Exception:
+            logger.exception("Failed to play audio file via webrtc-rs", extra={"path": path})
+            return False
+
     @simple_mcache
     def raw_lidar_stream(self) -> Observable[RawLidarMsg]:
         def enable_lidar() -> None:
@@ -283,7 +294,7 @@ class UnitreeWebRTCRSConnection(Resource):
                 ops.filter(lambda frame: frame is not None),
                 ops.map(
                     lambda frame: Image.from_numpy(
-                        np.ascontiguousarray(frame),
+                        frame,
                         format=ImageFormat.BGR,
                         frame_id="camera_optical",
                     )
