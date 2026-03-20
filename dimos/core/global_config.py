@@ -64,6 +64,7 @@ class GlobalConfig(BaseSettings):
 
     # Localization settings
     map_path: str | None = None
+    planner_reference_map_path: str | None = None
     enable_localization: bool = False
     initial_pose_x: float = 0.0
     initial_pose_y: float = 0.0
@@ -74,6 +75,7 @@ class GlobalConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_ignore_unknown_vars=True,
         extra="ignore",
     )
 
