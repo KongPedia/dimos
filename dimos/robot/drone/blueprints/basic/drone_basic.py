@@ -33,7 +33,6 @@ def _static_drone_body(rr: Any) -> list[Any]:
             half_sizes=[0.25, 0.25, 0.1],
             colors=[(255, 100, 0)],
         ),
-        rr.Transform3D(parent_frame="tf#/base_link"),
     ]
 
 

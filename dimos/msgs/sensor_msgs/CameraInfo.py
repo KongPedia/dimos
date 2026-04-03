@@ -368,14 +368,6 @@ class CameraInfo(Timestamped):
         if not optical_frame:
             return ret
 
-        # Add 3d transform from optical frame to world/image_topic (We know where the camera is)
-        ret.append(
-            (
-                image_topic,
-                rr.Transform3D(parent_frame=f"tf#/{optical_frame}"),
-            )
-        )
-
         return ret
 
 

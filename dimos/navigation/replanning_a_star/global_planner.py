@@ -23,9 +23,9 @@ from reactivex.disposable import CompositeDisposable
 from dimos.core.global_config import GlobalConfig
 from dimos.core.resource import Resource
 from dimos.mapping.occupancy.path_resampling import smooth_resample_path
-from dimos.spec.localization_spec import LocalizationSpec
 from dimos.msgs.geometry_msgs import Twist
 from dimos.msgs.geometry_msgs.PoseStamped import PoseStamped
+from dimos.msgs.geometry_msgs.Quaternion import Quaternion
 from dimos.msgs.geometry_msgs.Vector3 import Vector3
 from dimos.msgs.nav_msgs.OccupancyGrid import CostValues, OccupancyGrid
 from dimos.msgs.nav_msgs.Path import Path
@@ -36,6 +36,7 @@ from dimos.navigation.replanning_a_star.min_cost_astar import min_cost_astar
 from dimos.navigation.replanning_a_star.navigation_map import NavigationMap
 from dimos.navigation.replanning_a_star.position_tracker import PositionTracker
 from dimos.navigation.replanning_a_star.replan_limiter import ReplanLimiter
+from dimos.spec.localization_spec import LocalizationSpec
 from dimos.utils.logging_config import setup_logger
 from dimos.utils.trigonometry import angle_diff
 
@@ -68,8 +69,21 @@ class GlobalPlanner(Resource):
     _rotation_tolerance: float = math.radians(15)
     _replan_goal_tolerance: float = 0.5
     _max_replan_attempts: int = 10
-    _stuck_time_window: float = 8.0
+    _stuck_time_window: float = 2.0
     _max_path_deviation: float = 0.9
+    _escape_recovery_active: bool = False
+    _escape_forward_distances: tuple[float, ...] = (1.2, 1.8, 2.4)
+    _escape_angle_offsets: tuple[float, ...] = (
+        0.0,
+        math.radians(30),
+        -math.radians(30),
+        math.radians(60),
+        -math.radians(60),
+        math.radians(90),
+        -math.radians(90),
+        math.radians(135),
+        -math.radians(135),
+    )
 
     def __init__(self, global_config: GlobalConfig, localization: LocalizationSpec | None = None) -> None:
         self.path = Subject()
@@ -88,6 +102,7 @@ class GlobalPlanner(Resource):
         self._replan_reason = None
         self._lock = RLock()
         self._localization = localization
+        self._escape_recovery_active = False
 
     def start(self) -> None:
         self._local_planner.start()
@@ -121,11 +136,21 @@ class GlobalPlanner(Resource):
     def handle_global_costmap(self, msg: OccupancyGrid) -> None:
         self._navigation_map.update(msg)
 
+    def handle_local_costmap(self, msg: OccupancyGrid) -> None:
+        """
+        Accept a local costmap feed when one is wired into the planner module.
+
+        The replanning stack currently maintains a single navigation map input,
+        so local and global costmaps share the same update path.
+        """
+        self.handle_global_costmap(msg)
+
     def handle_goal_request(self, goal: PoseStamped) -> None:
         logger.info("Got new goal", goal=str(goal))
         with self._lock:
             self._current_goal = goal
             self._goal_reached = False
+            self._escape_recovery_active = False
         self._replan_limiter.reset()
         self._plan_path()
 
@@ -139,6 +164,7 @@ class GlobalPlanner(Resource):
                 self._current_goal = None
                 self._goal_reached = arrived
                 self._replan_limiter.reset()
+                self._escape_recovery_active = False
 
         self.path.on_next(Path())
         self._local_planner.stop_planning()
@@ -207,6 +233,11 @@ class GlobalPlanner(Resource):
             # Check if robot has veered too far off the path
             deviation = self._local_planner.get_distance_to_path()
             if deviation is not None and deviation > self._max_path_deviation:
+                if self._escape_recovery_active:
+                    logger.info("Escape recovery veered off track; failing goal and requesting new one.")
+                    self.cancel_goal(arrived=False)
+                    last_stuck_check = time.perf_counter()
+                    continue
                 logger.info(
                     "Robot veered off track. Replanning.",
                     deviation=round(deviation, 2),
@@ -227,6 +258,11 @@ class GlobalPlanner(Resource):
                 time.perf_counter() - last_stuck_check > self._stuck_time_window
                 and self._position_tracker.is_stuck()
             ):
+                if self._escape_recovery_active:
+                    logger.info("Robot is stuck during escape recovery; failing goal and requesting new one.")
+                    self.cancel_goal(arrived=False)
+                    last_stuck_check = time.perf_counter()
+                    continue
                 logger.info("Robot is stuck. Replanning.")
                 self._replan_path()
                 last_stuck_check = time.perf_counter()
@@ -244,12 +280,24 @@ class GlobalPlanner(Resource):
         self.path.on_next(Path())
 
         if stop_message == "arrived":
+            if self._escape_recovery_active:
+                logger.info("Escape recovery complete. Failing original goal so exploration can continue.")
+                self.cancel_goal(arrived=False)
+                return
             logger.info("Arrived at goal.")
             self.cancel_goal(arrived=True)
         elif stop_message == "obstacle_found":
+            if self._escape_recovery_active:
+                logger.info("Obstacle found during escape recovery. Failing original goal.")
+                self.cancel_goal(arrived=False)
+                return
             logger.info("Replanning path due to obstacle found.")
             self._replan_path()
         elif stop_message == "error":
+            if self._escape_recovery_active:
+                logger.info("Navigation error during escape recovery. Failing original goal.")
+                self.cancel_goal(arrived=False)
+                return
             logger.info("Failure in navigation.")
             self._replan_path()
         else:
@@ -265,6 +313,11 @@ class GlobalPlanner(Resource):
 
         assert current_odom is not None
         assert current_goal is not None
+
+        if self._escape_recovery_active:
+            logger.info("Escape recovery is active; failing current goal instead of replanning it again.")
+            self.cancel_goal(arrived=False)
+            return
 
         if current_goal.position.distance(current_odom.position) < self._replan_goal_tolerance:
             self.cancel_goal(arrived=True)
@@ -291,6 +344,8 @@ class GlobalPlanner(Resource):
             logger.warning("Cannot handle goal request: missing odometry.")
             return
 
+        escape_recovery_path = self._build_escape_recovery_path(current_odom)
+
         if self._localization is not None:
             try:
                 loc_state = self._localization.get_state()
@@ -306,6 +361,8 @@ class GlobalPlanner(Resource):
         safe_goal = self._find_safe_goal(current_goal.position)
 
         if not safe_goal:
+            if not self._start_escape_recovery(escape_recovery_path, reason="safe_goal_not_found"):
+                self.cancel_goal(arrived=False)
             return
 
         path = self._find_wide_path(safe_goal, current_odom.position)
@@ -314,6 +371,8 @@ class GlobalPlanner(Resource):
             logger.warning(
                 "No path found to the goal.", x=round(safe_goal.x, 3), y=round(safe_goal.y, 3)
             )
+            if not self._start_escape_recovery(escape_recovery_path, reason="path_not_found"):
+                self.cancel_goal(arrived=False)
             return
 
         resampled_path = smooth_resample_path(path, current_goal, 0.1)
@@ -322,9 +381,57 @@ class GlobalPlanner(Resource):
 
         self._local_planner.start_planning(resampled_path)
 
+    def _start_escape_recovery(self, path: Path | None, *, reason: str) -> bool:
+        if path is None or len(path.poses) < 2:
+            logger.warning("Escape recovery unavailable.", reason=reason)
+            return False
+
+        logger.info(
+            "Starting rotate-forward escape recovery.",
+            reason=reason,
+            poses=len(path.poses),
+            x=round(path.poses[-1].position.x, 3),
+            y=round(path.poses[-1].position.y, 3),
+        )
+        with self._lock:
+            self._escape_recovery_active = True
+        self.path.on_next(path)
+        self._local_planner.start_planning(path)
+        return True
+
+    def _build_escape_recovery_path(self, current_odom: PoseStamped) -> Path | None:
+        current_yaw = current_odom.orientation.euler[2]
+        current_position = current_odom.position
+        frame_id = current_odom.frame_id or "world"
+
+        for distance in self._escape_forward_distances:
+            for angle_offset in self._escape_angle_offsets:
+                heading = current_yaw + angle_offset
+                candidate_goal = Vector3(
+                    current_position.x + math.cos(heading) * distance,
+                    current_position.y + math.sin(heading) * distance,
+                    current_position.z,
+                )
+                safe_goal = self._find_safe_goal(candidate_goal)
+                if safe_goal is None:
+                    continue
+
+                escape_path = self._find_wide_path(safe_goal, current_position)
+                if not escape_path or not escape_path.poses:
+                    continue
+
+                recovery_goal = PoseStamped(
+                    frame_id=frame_id,
+                    position=[safe_goal.x, safe_goal.y, 0.0],
+                    orientation=Quaternion.from_euler(Vector3(0.0, 0.0, heading)),
+                )
+                return smooth_resample_path(escape_path, recovery_goal, 0.1)
+
+        return None
+
     def _find_wide_path(self, goal: Vector3, robot_pos: Vector3) -> Path | None:
         #        sizes_to_try: list[float] = [2.2, 1.7, 1.3, 1]
-        sizes_to_try: list[float] = [1.1]
+        sizes_to_try: list[float] = [1.1, 1.0, 0.9, 0.8]
 
         for size in sizes_to_try:
             costmap = self._navigation_map.make_gradient_costmap(size)

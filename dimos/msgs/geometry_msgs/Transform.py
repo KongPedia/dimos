@@ -290,16 +290,14 @@ class Transform(Timestamped):
         )
 
     def to_rerun(self) -> rr.Transform3D:
-        """Convert to rerun Transform3D format with frame IDs.
+        """Convert to rerun Transform3D format.
 
         Returns:
-            rr.Transform3D archetype for logging to rerun with parent/child frames
+            rr.Transform3D archetype for logging to rerun
         """
         import rerun as rr
 
         return rr.Transform3D(
             translation=[self.translation.x, self.translation.y, self.translation.z],
             rotation=self.rotation.to_rerun(),
-            parent_frame="tf#/" + self.frame_id,
-            child_frame="tf#/" + self.child_frame_id,
         )

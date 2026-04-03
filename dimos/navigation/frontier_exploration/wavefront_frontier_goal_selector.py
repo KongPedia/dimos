@@ -112,7 +112,10 @@ class WavefrontFrontierExplorer(Module):
         max_explored_distance: float = 10.0,
         info_gain_threshold: float = 0.03,
         num_no_gain_attempts: int = 2,
-        goal_timeout: float = 15.0,
+        goal_timeout: float = 6.0,
+        roaming_min_distance: float = 1.5,
+        roaming_max_distance: float = 6.0,
+        roaming_goal_history_limit: int = 20,
     ) -> None:
         """
         Initialize the frontier explorer.
@@ -138,13 +141,18 @@ class WavefrontFrontierExplorer(Module):
         self.last_costmap = None  # store last costmap for information comparison
         self.no_gain_counter = 0  # track consecutive no-gain attempts
         self.goal_timeout = goal_timeout
+        self.roaming_min_distance = roaming_min_distance
+        self.roaming_max_distance = roaming_max_distance
+        self.roaming_goal_history_limit = roaming_goal_history_limit
+        self._rng = np.random.default_rng()
 
         # Latest data
         self.latest_costmap: OccupancyGrid | None = None
         self.latest_odometry: PoseStamped | None = None
 
-        # Goal reached event
-        self.goal_reached_event = threading.Event()
+        # Goal completion event
+        self.goal_finished_event = threading.Event()
+        self.goal_succeeded = False
 
         # Exploration state
         self.exploration_active = False
@@ -188,8 +196,8 @@ class WavefrontFrontierExplorer(Module):
 
     def _on_goal_reached(self, msg: Bool) -> None:
         """Handle goal reached messages."""
-        if msg.data:
-            self.goal_reached_event.set()
+        self.goal_succeeded = bool(msg.data)
+        self.goal_finished_event.set()
 
     def _on_explore_cmd(self, msg: Bool) -> None:
         """Handle exploration command messages."""
@@ -638,11 +646,12 @@ class WavefrontFrontierExplorer(Module):
                     self.no_gain_counter += 1
                     if self.no_gain_counter >= self.num_no_gain_attempts:
                         logger.info(
-                            f"No information gain for {self.no_gain_counter} consecutive attempts"
+                            f"No information gain for {self.no_gain_counter} consecutive attempts, switching to roaming fallback"
                         )
-                        self.no_gain_counter = 0  # Reset counter when stopping due to no gain
-                        self.stop_exploration()
-                        return None
+                        self.no_gain_counter = 0
+                        roaming_goal = self._get_roaming_goal(robot_pose, costmap)
+                        self.last_costmap = costmap  # type: ignore[assignment]
+                        return roaming_goal
                 else:
                     self.no_gain_counter = 0
 
@@ -653,8 +662,10 @@ class WavefrontFrontierExplorer(Module):
         if not frontiers:
             # Store current costmap before returning
             self.last_costmap = costmap  # type: ignore[assignment]
-            self.reset_exploration_session()
-            return None
+            roaming_goal = self._get_roaming_goal(robot_pose, costmap)
+            if roaming_goal is None:
+                self.reset_exploration_session()
+            return roaming_goal
 
         # Update exploration direction based on best goal selection
         if frontiers:
@@ -676,6 +687,84 @@ class WavefrontFrontierExplorer(Module):
     def mark_explored_goal(self, goal: Vector3) -> None:
         """Mark a goal as explored."""
         self.explored_goals.append(goal)
+        if len(self.explored_goals) > self.roaming_goal_history_limit:
+            self.explored_goals = self.explored_goals[-self.roaming_goal_history_limit :]
+
+    def _get_roaming_goal(self, robot_pose: Vector3, costmap: OccupancyGrid) -> Vector3 | None:
+        """Pick a random free-space roaming goal when no useful frontier is available."""
+        traversable_mask = (costmap.grid != CostValues.UNKNOWN) & (
+            costmap.grid < self.occupancy_threshold
+        )
+        free_y, free_x = np.where(traversable_mask)
+
+        if free_x.size == 0:
+            return None
+
+        candidate_indices = np.arange(free_x.size)
+        if free_x.size > 2000:
+            stride = max(1, free_x.size // 2000)
+            candidate_indices = candidate_indices[::stride]
+
+        candidate_goals: list[tuple[Vector3, float, float]] = []
+
+        for idx in candidate_indices:
+            world_pos = costmap.grid_to_world((int(free_x[idx]), int(free_y[idx])))
+            distance = get_distance(robot_pose, world_pos)
+
+            if distance < self.roaming_min_distance:
+                continue
+            if distance > self.roaming_max_distance:
+                continue
+
+            novelty_score = 1.0
+            if self.explored_goals:
+                nearest_explored = min(
+                    get_distance(world_pos, explored_goal)
+                    for explored_goal in self.explored_goals[-self.roaming_goal_history_limit :]
+                )
+                novelty_score = min(1.0, nearest_explored / self.roaming_max_distance)
+
+            if novelty_score < 0.15:
+                continue
+
+            candidate_goals.append((world_pos, distance, novelty_score))
+
+        if not candidate_goals:
+            for idx in candidate_indices:
+                world_pos = costmap.grid_to_world((int(free_x[idx]), int(free_y[idx])))
+                distance = get_distance(robot_pose, world_pos)
+                if self.roaming_min_distance <= distance <= self.roaming_max_distance:
+                    candidate_goals.append((world_pos, distance, 0.0))
+
+        if not candidate_goals:
+            return None
+
+        if len(candidate_goals) > 30:
+            sampled_indices = self._rng.choice(len(candidate_goals), size=30, replace=False)
+            candidate_goals = [candidate_goals[int(i)] for i in sampled_indices]
+
+        target_distance = (self.roaming_min_distance + self.roaming_max_distance) / 2
+        weights = []
+        for _, distance, novelty_score in candidate_goals:
+            distance_score = 1.0 - min(1.0, abs(distance - target_distance) / target_distance)
+            weights.append(max(0.05, novelty_score * 0.7 + distance_score * 0.3))
+
+        weight_array = np.asarray(weights, dtype=np.float64)
+        weight_array /= weight_array.sum()
+        selected_index = int(self._rng.choice(len(candidate_goals), p=weight_array))
+        best_goal, best_distance, best_novelty = candidate_goals[selected_index]
+
+        if best_goal is not None:
+            logger.info(
+                "Selected random roaming fallback goal",
+                x=round(best_goal.x, 2),
+                y=round(best_goal.y, 2),
+                distance=round(best_distance, 2),
+                novelty=round(best_novelty, 3),
+            )
+            self.mark_explored_goal(best_goal)
+
+        return best_goal
 
     def reset_exploration_session(self) -> None:
         """
@@ -792,37 +881,32 @@ class WavefrontFrontierExplorer(Module):
                 goals_published += 1
                 consecutive_failures = 0  # Reset failure counter on success
 
-                # Clear the goal reached event for next iteration
-                self.goal_reached_event.clear()
+                self.goal_succeeded = False
+                self.goal_finished_event.clear()
 
-                # Wait for goal to be reached or timeout
-                logger.info("Waiting for goal to be reached...")
-                goal_reached = self.goal_reached_event.wait(timeout=self.goal_timeout)
+                # Wait for goal to finish or timeout
+                logger.info("Waiting for goal result...")
+                goal_finished = self.goal_finished_event.wait(timeout=self.goal_timeout)
 
-                if goal_reached:
+                if goal_finished and self.goal_succeeded:
                     logger.info("Goal reached, finding next frontier")
+                elif goal_finished:
+                    logger.warning("Goal ended without arrival, selecting another roaming target")
                 else:
-                    logger.warning("Goal timeout after 30 seconds, finding next frontier anyway")
+                    logger.warning("Goal timeout, selecting another roaming target")
             else:
                 consecutive_failures += 1
 
-                # Only give up if we've published at least 2 goals AND had many consecutive failures
-                if goals_published >= 2 and consecutive_failures >= max_consecutive_failures:
-                    logger.info(
-                        f"Exploration complete after {goals_published} goals and {consecutive_failures} consecutive failures finding new frontiers"
+                logger.info(
+                    f"No exploration target found (attempt {consecutive_failures}/{max_consecutive_failures}). Retrying..."
+                )
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.warning(
+                        "Exploration target selection repeatedly failed; keeping mode active and retrying after backoff"
                     )
-                    self.exploration_active = False
-                    break
-                elif goals_published < 2:
-                    logger.info(
-                        f"No frontier found, but only {goals_published} goals published so far. Retrying in 2 seconds..."
-                    )
-                    threading.Event().wait(2.0)
-                else:
-                    logger.info(
-                        f"No frontier found (attempt {consecutive_failures}/{max_consecutive_failures}). Retrying in 2 seconds..."
-                    )
-                    threading.Event().wait(2.0)
+                    consecutive_failures = 0
+
+                self.stop_event.wait(min(2.0, max(0.2, self.goal_timeout / 10)))
 
     @skill
     def begin_exploration(self) -> str:

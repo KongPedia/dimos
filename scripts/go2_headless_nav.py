@@ -139,6 +139,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Worker memory limit hint",
     )
     parser.add_argument("--planner-robot-speed", type=float, default=None)
+    parser.add_argument(
+        "--viewer",
+        choices=["rerun-web", "rerun", "none", "foxglove"],
+        default="rerun-web",
+        help="Visualization backend / command-center mode",
+    )
+    parser.add_argument(
+        "--auto-explore",
+        action="store_true",
+        help="Start frontier exploration automatically after startup",
+    )
     parser.add_argument("--navigation-voxel-size", type=float, default=0.05)
     parser.add_argument(
         "--map-publish-interval",
@@ -152,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0.1,
         help="Seconds between costmap updates (0 = every map update)",
     )
-    parser.add_argument("--goal-timeout", type=float, default=15.0)
+    parser.add_argument("--goal-timeout", type=float, default=10.0)
     parser.add_argument("--voxel-device", default="CUDA:0", help="Voxel mapper device")
     parser.add_argument("--skip-recovery", action="store_true", help="Skip recovery stand on startup")
     parser.add_argument("--mqtt-broker", type=str, default=None, help="MQTT broker host (enables MQTT mode)")
@@ -427,7 +438,7 @@ def main() -> None:
     blueprint = blueprint.global_config(
         robot_ip=args.robot_ip,
         unitree_connection=args.unitree_connection,
-        viewer="rerun-web",
+        viewer=args.viewer,
         n_workers=args.n_workers,
         memory_limit=args.memory_limit,
         planner_robot_speed=args.planner_robot_speed,
@@ -463,7 +474,10 @@ def main() -> None:
     assert connection is not None
 
     print("Headless Go2 navigation is running.")
-    print(f"robot_ip={args.robot_ip}, voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}")
+    print(
+        f"robot_ip={args.robot_ip}, viewer={args.viewer}, "
+        f"voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}"
+    )
     if args.map_path:
         print(f"map_path={args.map_path}")
         print("saved occupancy map reference enabled for localization")
@@ -508,6 +522,9 @@ def main() -> None:
 
     _print_help()
 
+    if args.auto_explore:
+        print(f"auto explore started={explorer.explore()}")
+
     try:
         while True:
             raw = input("go2-nav> ").strip()
@@ -537,4 +554,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -62,16 +62,49 @@ cd "$SCRIPT_DIR"
 # Use fastlio2 branch which has both arise_slam and FASTLIO2
 TARGET_BRANCH="fastlio2"
 TARGET_REMOTE="origin"
-CLONE_URL="https://github.com/dimensionalOS/ros-navigation-autonomy-stack.git"
+DEFAULT_CLONE_URL_HTTPS="https://github.com/dimensionalOS/ros-navigation-autonomy-stack.git"
+DEFAULT_CLONE_URL_SSH="git@github.com:dimensionalOS/ros-navigation-autonomy-stack.git"
+CLONE_URL_OVERRIDE="${DIMOS_ROS_NAV_CLONE_URL:-}"
+
+resolve_clone_url() {
+    if [ -n "${CLONE_URL_OVERRIDE}" ]; then
+        echo "${CLONE_URL_OVERRIDE}"
+        return 0
+    fi
+
+    if git ls-remote --exit-code --heads "${DEFAULT_CLONE_URL_HTTPS}" "${TARGET_BRANCH}" >/dev/null 2>&1; then
+        echo "${DEFAULT_CLONE_URL_HTTPS}"
+        return 0
+    fi
+
+    if git ls-remote --exit-code --heads "${DEFAULT_CLONE_URL_SSH}" "${TARGET_BRANCH}" >/dev/null 2>&1; then
+        echo "${DEFAULT_CLONE_URL_SSH}"
+        return 0
+    fi
+
+    echo -e "${RED}Unable to access ros-navigation-autonomy-stack via HTTPS or SSH.${NC}" >&2
+    echo -e "${RED}Set DIMOS_ROS_NAV_CLONE_URL to an accessible Git remote and retry.${NC}" >&2
+    return 1
+}
+
+CLONE_URL="$(resolve_clone_url)"
 
 # Clone or checkout ros-navigation-autonomy-stack
 if [ ! -d "ros-navigation-autonomy-stack" ]; then
     echo -e "${YELLOW}Cloning ros-navigation-autonomy-stack repository (${TARGET_BRANCH} branch)...${NC}"
+    echo -e "${YELLOW}Clone remote: ${CLONE_URL}${NC}"
     git clone -b ${TARGET_BRANCH} ${CLONE_URL} ros-navigation-autonomy-stack
     echo -e "${GREEN}Repository cloned successfully!${NC}"
 else
     # Directory exists, ensure we're on the correct branch
     cd ros-navigation-autonomy-stack
+
+    CURRENT_REMOTE_URL="$(git remote get-url ${TARGET_REMOTE} 2>/dev/null || true)"
+    if [ -n "${CURRENT_REMOTE_URL}" ] && ! git ls-remote --exit-code --heads "${CURRENT_REMOTE_URL}" "${TARGET_BRANCH}" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Remote ${TARGET_REMOTE} is not accessible via ${CURRENT_REMOTE_URL}.${NC}"
+        echo -e "${YELLOW}Switching ${TARGET_REMOTE} to ${CLONE_URL}.${NC}"
+        git remote set-url ${TARGET_REMOTE} ${CLONE_URL}
+    fi
 
     CURRENT_BRANCH=$(git branch --show-current)
     if [ "$CURRENT_BRANCH" != "${TARGET_BRANCH}" ]; then

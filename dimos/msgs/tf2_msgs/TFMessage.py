@@ -139,8 +139,25 @@ class TFMessage:
             for path, transform in tf_msg.to_rerun():
                 rr.log(path, transform)
         """
+        child_to_transform = {transform.child_frame_id: transform for transform in self.transforms}
+
+        def _entity_path_for(transform: Transform) -> str:
+            segments = [transform.child_frame_id]
+            parent = transform.frame_id
+            visited = {transform.child_frame_id}
+
+            while parent and parent not in {"world", "/world"} and parent not in visited:
+                visited.add(parent)
+                segments.append(parent)
+                parent_transform = child_to_transform.get(parent)
+                if parent_transform is None:
+                    break
+                parent = parent_transform.frame_id
+
+            return "world/tf/" + "/".join(reversed(segments))
+
         results: RerunMulti = []
         for transform in self.transforms:
-            entity_path = f"world/tf/{transform.child_frame_id}"
+            entity_path = _entity_path_for(transform)
             results.append((entity_path, transform.to_rerun()))
         return results

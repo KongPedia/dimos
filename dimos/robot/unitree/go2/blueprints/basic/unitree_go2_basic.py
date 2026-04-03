@@ -89,7 +89,6 @@ def _static_base_link(rr: Any) -> list[Any]:
             colors=[(0, 255, 127)],
             fill_mode="wireframe",
         ),
-        rr.Transform3D(parent_frame="tf#/base_link"),
     ]
 
 

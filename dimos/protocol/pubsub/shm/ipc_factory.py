@@ -49,9 +49,13 @@ def _open_shm_with_retry(name: str) -> SharedMemory:
             return _unregister(SharedMemory(name=name))
         except FileNotFoundError as e:
             last = e
+        except ValueError as e:
+            if "empty file" not in str(e):
+                raise
+            last = e
             # exponential backoff, capped
-            time.sleep(min((base_ms * (2**i)), cap_ms) / 1000.0)
-    raise FileNotFoundError(f"SHM not found after {tries} retries: {name}") from last
+        time.sleep(min((base_ms * (2**i)), cap_ms) / 1000.0)
+    raise RuntimeError(f"SHM not ready after {tries} retries: {name}") from last
 
 
 # ---------------------------
@@ -151,7 +155,7 @@ class CpuShmChannel(FrameChannel):
                 owner = True
             except FileExistsError:
                 # Reader: unregister because we only close(), never unlink().
-                shm = _unregister(SharedMemory(name=name))
+                shm = _open_shm_with_retry(name)
                 owner = False
             return shm, owner
 
