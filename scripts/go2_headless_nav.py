@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import threading
 import time
 from typing import Any
@@ -38,6 +39,15 @@ try:
     MQTT_AVAILABLE = True
 except ImportError:
     MQTT_AVAILABLE = False
+
+try:
+    from battlebang_go2.adapters.uart import HpReading, UartSupervisor, UartTransport
+
+    BATTLEBANG_UART_AVAILABLE = True
+    BATTLEBANG_UART_IMPORT_ERROR: Exception | None = None
+except Exception as exc:
+    BATTLEBANG_UART_AVAILABLE = False
+    BATTLEBANG_UART_IMPORT_ERROR = exc
 
 from dimos.constants import (
     DEFAULT_CAPACITY_COLOR_IMAGE,
@@ -50,7 +60,7 @@ from dimos.localization import LocalizationModule, localization_module
 from dimos.mapping.costmapper import CostMapper, cost_mapper
 from dimos.mapping.pointclouds.occupancy import GeneralOccupancyConfig
 from dimos.mapping.voxels import voxel_mapper
-from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Vector3
+from dimos.msgs.geometry_msgs import PoseStamped, Quaternion, Twist, Vector3
 from dimos.msgs.nav_msgs import OccupancyGrid
 from dimos.msgs.sensor_msgs import Image, PointCloud2
 from dimos.navigation.frontier_exploration.wavefront_frontier_goal_selector import (
@@ -64,7 +74,7 @@ from dimos.navigation.replanning_a_star.module import (
 from dimos.web.websocket_vis.websocket_vis_module import WebsocketVisModule, websocket_vis
 from dimos.protocol import pubsub
 from dimos.robot.unitree.go2.connection import GO2Connection, go2_connection
-from unitree_webrtc_connect.constants import RTC_TOPIC
+from unitree_webrtc_connect.constants import RTC_TOPIC, SPORT_CMD
 
 
 JETSON_TRANSPORTS = {
@@ -81,6 +91,156 @@ JETSON_TRANSPORTS = {
         "global_costmap", default_capacity=DEFAULT_CAPACITY_OCCUPANCY_GRID
     ),
 }
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _execute_dead_action(
+    navigator: ReplanningAStarPlanner,
+    explorer: WavefrontFrontierExplorer,
+    connection: GO2Connection,
+) -> dict[str, Any]:
+    cancelled = navigator.cancel_goal()
+    explore_stopped = explorer.stop_exploration()
+    damp_result = connection.publish_request(
+        RTC_TOPIC["SPORT_MOD"],
+        {"api_id": SPORT_CMD["Damp"]},
+    )
+    stop_result = connection.move(Twist.zero())
+    return {
+        "cancelled": cancelled,
+        "explore_stopped": explore_stopped,
+        "damp_result": damp_result,
+        "stop_result": stop_result,
+    }
+
+
+def _execute_restart_action(
+    connection: GO2Connection,
+    latest_hp: list[float | None],
+    dead_latched: list[bool],
+    zero_blocked_until_positive: list[bool],
+    hp_monitor: tuple[threading.Event, threading.Thread, list[float | None]] | None,
+) -> dict[str, Any]:
+    dead_latched[0] = False
+    latest_hp[0] = None
+    zero_blocked_until_positive[0] = True
+
+    payload_sent = False
+    if hp_monitor is not None:
+        try:
+            _, _, _ = hp_monitor
+            supervisor = UartSupervisor(
+                transport=UartTransport(
+                    device=os.getenv("UART_DEVICE", "/dev/ttyTHS1"),
+                    baud=_env_int("UART_BAUD", 115200),
+                )
+            )
+            supervisor.start()
+            supervisor.ensure_connected(time.time_ns())
+            payload_sent = supervisor.try_send("2")
+            supervisor.stop()
+        except Exception:
+            payload_sent = False
+
+    recovery_result = connection.publish_request(
+        RTC_TOPIC["SPORT_MOD"],
+        {"api_id": SPORT_CMD["RecoveryStand"]},
+    )
+    return {
+        "dead_lock_cleared": True,
+        "hp_reset_payload_sent": payload_sent,
+        "recovery_result": recovery_result,
+    }
+
+
+def _start_hp_monitor(
+    navigator: ReplanningAStarPlanner,
+    explorer: WavefrontFrontierExplorer,
+    connection: GO2Connection,
+    dead_latched: list[bool],
+    zero_blocked_until_positive: list[bool],
+) -> tuple[threading.Event, threading.Thread, list[float | None]] | None:
+    if not _env_bool("UART_ENABLED", False):
+        return None
+
+    if not BATTLEBANG_UART_AVAILABLE:
+        print(
+            "[warn] UART_ENABLED is true but BattleBang UART adapter is unavailable. "
+            f"Import error: {BATTLEBANG_UART_IMPORT_ERROR}",
+            flush=True,
+        )
+        return None
+
+    device = os.getenv("UART_DEVICE")
+    if not device:
+        print("[warn] UART_ENABLED is true but UART_DEVICE is not set.", flush=True)
+        return None
+
+    baud = _env_int("UART_BAUD", 115200)
+    stop_event = threading.Event()
+    supervisor = UartSupervisor(transport=UartTransport(device=device, baud=baud))
+    latest_hp: list[float | None] = [None]
+
+    def _worker() -> None:
+        supervisor.start()
+        try:
+            while not stop_event.is_set():
+                for event in supervisor.poll(time.time_ns()):
+                    if not isinstance(event, HpReading):
+                        continue
+
+                    hp = float(event.value)
+                    latest_hp[0] = hp
+
+                    if hp > 0.0:
+                        zero_blocked_until_positive[0] = False
+
+                    if (
+                        hp <= 0.0
+                        and not dead_latched[0]
+                        and not zero_blocked_until_positive[0]
+                    ):
+                        dead_latched[0] = True
+                        print("[HP] zero detected -> executing dead action", flush=True)
+                        try:
+                            result = _execute_dead_action(navigator, explorer, connection)
+                            print(f"[HP] dead action result={result}", flush=True)
+                        except Exception as exc:
+                            print(f"[warn] dead action failed: {exc}", flush=True)
+                stop_event.wait(0.05)
+        finally:
+            supervisor.stop()
+
+    thread = threading.Thread(target=_worker, daemon=True, name="HpMonitor")
+    thread.start()
+    print(f"[HP] monitoring UART device={device} baud={baud}", flush=True)
+    return stop_event, thread, latest_hp
 
 
 def _resolve_voxel_device(requested_device: str) -> str:
@@ -192,9 +352,13 @@ def _print_help() -> None:
     print("  explore stop               # stop frontier exploration")
     print("  explore status             # print exploration status")
     print("  save_map <path>            # save latest global costmap to yaml/png/npy")
+    print("  hp                         # print latest HP value from ESP/UART")
     print("  localization               # print localization state")
     print("  state                      # print planner state")
     print("  cancel                     # cancel current goal")
+    print("  dead                       # cancel nav/explore and run dead action")
+    print("  damp                       # send Unitree damp command directly")
+    print("  restart                    # clear dead lock, send HP reset, run recovery")
     print("  recovery                   # run recovery stand (unlock robot)")
     print("  standup                    # make robot stand up")
     print("  liedown                    # make robot lie down")
@@ -262,6 +426,29 @@ def _handle_robot_command(parts: list[str], connection: GO2Connection) -> None:
         print(f"liedown result={result}")
         return
 
+    if cmd == "damp":
+        print("[INFO] Sending damp command...")
+        result = connection.publish_request(
+            RTC_TOPIC["SPORT_MOD"],
+            {"api_id": SPORT_CMD["Damp"]},
+        )
+        print(f"damp result={result}")
+        return
+
+
+def _handle_dead_command(
+    parts: list[str],
+    navigator: ReplanningAStarPlanner,
+    explorer: WavefrontFrontierExplorer,
+    connection: GO2Connection,
+) -> None:
+    if len(parts) != 1:
+        print("usage: dead")
+        return
+
+    result = _execute_dead_action(navigator, explorer, connection)
+    print(f"dead {result}")
+
 
 def _handle_save_map_command(parts: list[str], costmapper: CostMapper | None) -> None:
     if len(parts) != 2:
@@ -288,6 +475,41 @@ def _handle_localization_command(localization: LocalizationModule | None) -> Non
 
     print(f"localization state={localization.get_state()}")
     print(f"localization match_score={localization.get_match_score():.3f}")
+
+
+def _handle_hp_command(parts: list[str], latest_hp: list[float | None]) -> None:
+    if len(parts) != 1:
+        print("usage: hp")
+        return
+
+    hp = latest_hp[0]
+    if hp is None:
+        print("hp unavailable: no UART HP value received yet")
+        return
+
+    print(f"hp={hp:.1f}")
+
+
+def _handle_restart_command(
+    parts: list[str],
+    connection: GO2Connection,
+    latest_hp: list[float | None],
+    dead_latched: list[bool],
+    zero_blocked_until_positive: list[bool],
+    hp_monitor: tuple[threading.Event, threading.Thread, list[float | None]] | None,
+) -> None:
+    if len(parts) != 1:
+        print("usage: restart")
+        return
+
+    result = _execute_restart_action(
+        connection,
+        latest_hp,
+        dead_latched,
+        zero_blocked_until_positive,
+        hp_monitor,
+    )
+    print(f"restart {result}")
 
 
 def _mqtt_listener(
@@ -350,6 +572,10 @@ def _dispatch_command(
     connection: GO2Connection,
     costmapper: CostMapper | None,
     localization: LocalizationModule | None,
+    dead_latched: list[bool],
+    zero_blocked_until_positive: list[bool],
+    latest_hp: list[float | None],
+    hp_monitor: tuple[threading.Event, threading.Thread, list[float | None]] | None,
 ) -> bool:
     cmd = parts[0].lower()
     if cmd in {"quit", "exit"}:
@@ -359,6 +585,13 @@ def _dispatch_command(
         _print_help()
         return True
 
+    if dead_latched[0]:
+        if cmd in {"state", "localization", "hp", "restart"}:
+            pass
+        else:
+            print("robot is dead; commands are locked")
+            return True
+
     if cmd == "goal":
         _handle_goal_command(parts, navigator)
         return True
@@ -367,12 +600,31 @@ def _dispatch_command(
         _handle_explore_command(parts, explorer)
         return True
 
-    if cmd in {"recovery", "standup", "liedown"}:
+    if cmd == "dead":
+        _handle_dead_command(parts, navigator, explorer, connection)
+        return True
+
+    if cmd in {"recovery", "standup", "liedown", "damp"}:
         _handle_robot_command(parts, connection)
         return True
 
     if cmd == "save_map":
         _handle_save_map_command(parts, costmapper)
+        return True
+
+    if cmd == "hp":
+        _handle_hp_command(parts, latest_hp)
+        return True
+
+    if cmd == "restart":
+        _handle_restart_command(
+            parts,
+            connection,
+            latest_hp,
+            dead_latched,
+            zero_blocked_until_positive,
+            hp_monitor,
+        )
         return True
 
     if cmd == "localization":
@@ -478,6 +730,17 @@ def main() -> None:
         f"robot_ip={args.robot_ip}, viewer={args.viewer}, "
         f"voxel_size={args.navigation_voxel_size}, voxel_device={voxel_device}"
     )
+    print("battlebang UART dead-only bridge enabled (HP zero => abort + damp)")
+    dead_latched = [False]
+    zero_blocked_until_positive = [False]
+    hp_monitor = _start_hp_monitor(
+        navigator,
+        explorer,
+        connection,
+        dead_latched,
+        zero_blocked_until_positive,
+    )
+    latest_hp = hp_monitor[2] if hp_monitor is not None else [None]
     if args.map_path:
         print(f"map_path={args.map_path}")
         print("saved occupancy map reference enabled for localization")
@@ -539,12 +802,20 @@ def main() -> None:
                 connection,
                 costmapper,
                 localization,
+                dead_latched,
+                zero_blocked_until_positive,
+                latest_hp,
+                hp_monitor,
             ):
                 break
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
     finally:
+        if hp_monitor is not None:
+            stop_event, thread, _ = hp_monitor
+            stop_event.set()
+            thread.join(timeout=1.0)
         try:
             explorer.stop_exploration()
         except Exception:
